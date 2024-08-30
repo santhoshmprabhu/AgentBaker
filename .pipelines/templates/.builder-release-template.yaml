@@ -33,7 +33,7 @@ steps:
         **/igvm-measurement**
         **/kata-containers-igvm.img**
         **/kata-containers.img**
-        **/kata-containers-initrd-base.img**
+        **/kata-containers-cc.img**
         **/reference-info-base64**
       downloadPath: $(Build.SourcesDirectory)
     condition: or(eq(variables.OS_SKU, 'CBLMariner'), eq(variables.OS_SKU, 'AzureLinux'))
@@ -290,7 +290,7 @@ steps:
     displayName: Getting Shared Access Signature URI
     condition: and(succeeded(), eq(variables.DRY_RUN, 'False'))
   - task: PublishPipelineArtifact@1
-    displayName: Publish publishing-info 
+    displayName: Publish publishing-info
     inputs:
       artifactName: 'publishing-info-${{ parameters.artifactName }}'
       targetPath: 'vhd-publishing-info.json'
@@ -301,7 +301,7 @@ steps:
       SourceFolder: '$(System.DefaultWorkingDirectory)'
       Contents: 'vhd-publishing-info.json'
       TargetFolder: '$(Build.ArtifactStagingDirectory)'
-    displayName: Copy vhd publishing info 
+    displayName: Copy vhd publishing info
   - task: UniversalPackages@0
     displayName: Universal Publish
     condition: and(succeeded(), eq(variables.DRY_RUN, 'False'))

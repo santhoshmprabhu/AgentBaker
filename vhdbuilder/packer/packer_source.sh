@@ -151,11 +151,11 @@ copyPackerFiles() {
     IGVM_BIN_DEST=$KATACC_CONFIG_DIR/kata-containers-igvm.img
     cpAndMode $IGVM_BIN_SRC $IGVM_BIN_DEST 0755
 
-    KATA_INITRD_SRC=/home/packer/kata-containers-initrd-base.img
-    KATA_INITRD_DEST=$KATA_CONFIG_DIR/kata-containers-initrd.img
-    cpAndMode $KATA_INITRD_SRC $KATA_INITRD_DEST 0755
+    KATA_IMAGE_SRC=/home/packer/kata-containers.img
+    KATA_IMAGE_DEST=$KATA_CONFIG_DIR/kata-containers.img
+    cpAndMode $KATA_IMAGE_SRC $KATA_IMAGE_DEST 0755
 
-    KATACC_IMAGE_SRC=/home/packer/kata-containers.img
+    KATACC_IMAGE_SRC=/home/packer/kata-containers-cc.img
     KATACC_IMAGE_DEST=$KATACC_CONFIG_DIR/kata-containers.img
     cpAndMode $KATACC_IMAGE_SRC $KATACC_IMAGE_DEST 0755
 
