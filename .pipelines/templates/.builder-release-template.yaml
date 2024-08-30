@@ -72,7 +72,7 @@ steps:
         **/igvm-measurement**
         **/kata-containers-igvm.img**
         **/kata-containers.img**
-        **/kata-containers-initrd-base.img**
+        **/kata-containers-cc.img**
         **/reference-info-base64**
       downloadPath: $(Build.SourcesDirectory)
     condition: or(eq(variables.OS_SKU, 'CBLMariner'), eq(variables.OS_SKU, 'AzureLinux'))

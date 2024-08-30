@@ -552,13 +552,13 @@
     },
     {
       "type": "file",
-      "source": "kata-containers-initrd-base.img",
-      "destination": "/home/packer/kata-containers-initrd-base.img"
+      "source": "kata-containers.img",
+      "destination": "/home/packer/kata-containers.img"
     },
     {
       "type": "file",
-      "source": "kata-containers.img",
-      "destination": "/home/packer/kata-containers.img"
+      "source": "kata-containers-cc.img",
+      "destination": "/home/packer/kata-containers-cc.img"
     },
     {
       "type": "file",
