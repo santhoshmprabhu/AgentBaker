@@ -61,7 +61,7 @@ func extractLogsFromVM(ctx context.Context, t *testing.T, vmssName, privateIP, s
 		"sysctl-out": "sysctl -a",
 	}
 
-	podName, err := getDebugPodName(ctx, opts.clusterConfig.Kube)
+	podName, err := getHostNetworkDebugPodName(ctx, opts.clusterConfig.Kube)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get debug pod name: %w", err)
 	}
@@ -71,10 +71,23 @@ func extractLogsFromVM(ctx context.Context, t *testing.T, vmssName, privateIP, s
 		t.Logf("executing command on remote VM at %s of VMSS %s: %q", privateIP, vmssName, sourceCmd)
 
 		execResult, err := execOnVM(ctx, opts.clusterConfig.Kube, privateIP, podName, sshPrivateKey, sourceCmd, false)
-		result[file+".stdout.txt"] = execResult.stdout.String()
-		result[file+".stderr.txt"] = execResult.stderr.String()
 		if err != nil {
+			t.Logf("error executing command on remote VM at %s of VMSS %s: %s", privateIP, vmssName, err)
 			return nil, err
+		}
+
+		if execResult.stdout != nil {
+			out := execResult.stdout.String()
+			if out != "" {
+				result[file+".stdout.txt"] = out
+			}
+
+		}
+		if execResult.stderr != nil {
+			out := execResult.stderr.String()
+			if out != "" {
+				result[file+".stderr.txt"] = out
+			}
 		}
 	}
 	return result, nil
@@ -87,7 +100,7 @@ func extractClusterParameters(ctx context.Context, t *testing.T, kube *Kubeclien
 		"/var/lib/kubelet/bootstrap-kubeconfig": "cat /var/lib/kubelet/bootstrap-kubeconfig",
 	}
 
-	podName, err := getDebugPodName(ctx, kube)
+	podName, err := getHostNetworkDebugPodName(ctx, kube)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +139,13 @@ func execOnVM(ctx context.Context, kube *Kubeclient, vmPrivateIP, jumpboxPodName
 }
 
 func execOnPrivilegedPod(ctx context.Context, kube *Kubeclient, namespace, podName string, command string) (*podExecResult, error) {
-	privilegedCommand := append(nsenterCommandArray(), command)
+	privilegedCommand := append(privelegedCommandArray(), command)
 	return execOnPod(ctx, kube, namespace, podName, privilegedCommand)
+}
+
+func execOnUnprivilegedPod(ctx context.Context, kube *Kubeclient, namespace, podName, command string) (*podExecResult, error) {
+	nonPrivilegedCommand := append(unprivilegedCommandArray(), command)
+	return execOnPod(ctx, kube, namespace, podName, nonPrivilegedCommand)
 }
 
 func execOnPod(ctx context.Context, kube *Kubeclient, namespace, podName string, command []string) (*podExecResult, error) {
@@ -177,28 +195,17 @@ func execOnPod(ctx context.Context, kube *Kubeclient, namespace, podName string,
 	}, nil
 }
 
-func getWasmCurlCommand(url string) string {
-	return fmt.Sprintf(`curl \
---connect-timeout 5 \
---max-time 10 \
---retry 10 \
---retry-max-time 100 \
-%s`, url)
-}
-
-func bashCommandArray() []string {
+func privelegedCommandArray() []string {
 	return []string{
-		"/bin/bash",
+		"chroot",
+		"/proc/1/root",
+		"bash",
 		"-c",
 	}
 }
 
-func nsenterCommandArray() []string {
+func unprivilegedCommandArray() []string {
 	return []string{
-		"nsenter",
-		"-t",
-		"1",
-		"-m",
 		"bash",
 		"-c",
 	}

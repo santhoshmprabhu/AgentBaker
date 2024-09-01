@@ -92,6 +92,11 @@
     },
     {
       "type": "file",
+      "source": "vhdbuilder/lister/bin/lister",
+      "destination": "/home/packer/lister"
+    },
+    {
+      "type": "file",
       "source": "nbcparser/bin/nbcparser-amd64",
       "destination": "/home/packer/nbcparser"
     },
@@ -292,7 +297,7 @@
     },
     {
       "type": "file",
-      "source": "vhdbuilder/packer/components.json",
+      "source": "parts/linux/cloud-init/artifacts/components.json",
       "destination": "/home/packer/components.json"
     },
     {
@@ -314,6 +319,11 @@
       "type": "file",
       "source": "parts/linux/cloud-init/artifacts/rsyslog-d-60-CIS.conf",
       "destination": "/home/packer/rsyslog-d-60-CIS.conf"
+    },
+    {
+      "type": "file",
+      "source": "parts/linux/cloud-init/artifacts/logrotate-d-rsyslog-CIS.conf",
+      "destination": "/home/packer/logrotate-d-rsyslog-CIS.conf"
     },
     {
       "type": "file",

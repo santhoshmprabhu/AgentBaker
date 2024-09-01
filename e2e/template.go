@@ -28,7 +28,7 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 				ProvisioningState: "",
 				OrchestratorProfile: &datamodel.OrchestratorProfile{
 					OrchestratorType:    "Kubernetes",
-					OrchestratorVersion: "1.26.0",
+					OrchestratorVersion: "1.29.6",
 					KubernetesConfig: &datamodel.KubernetesConfig{
 						KubernetesImageBase:               "",
 						MCRKubernetesImageBase:            "",
@@ -100,6 +100,7 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 						VnetSubnetID:        "",
 						Distro:              "aks-ubuntu-containerd-18.04-gen2",
 						CustomNodeLabels: map[string]string{
+							"kubernetes.azure.com/cluster":            "test-cluster", // Some AKS daemonsets require that this exists, but the value doesn't matter.
 							"kubernetes.azure.com/mode":               "system",
 							"kubernetes.azure.com/node-image-version": "AKSUbuntu-1804gen2containerd-2022.01.19",
 						},
@@ -272,6 +273,7 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 			VnetSubnetID:        "",
 			Distro:              "aks-ubuntu-containerd-18.04-gen2",
 			CustomNodeLabels: map[string]string{
+				"kubernetes.azure.com/cluster":            "test-cluster", // Some AKS daemonsets require that this exists, but the value doesn't matter.
 				"kubernetes.azure.com/mode":               "system",
 				"kubernetes.azure.com/node-image-version": "AKSUbuntu-1804gen2containerd-2022.01.19",
 			},
@@ -379,8 +381,8 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 			"--azure-container-registry-config":   "/etc/kubernetes/azure.json",
 			"--cgroups-per-qos":                   "true",
 			"--client-ca-file":                    "/etc/kubernetes/certs/ca.crt",
-			"--cloud-config":                      "/etc/kubernetes/azure.json",
-			"--cloud-provider":                    "azure",
+			"--cloud-config":                      "",
+			"--cloud-provider":                    "external",
 			"--cluster-dns":                       "10.0.0.10",
 			"--cluster-domain":                    "cluster.local",
 			"--dynamic-config-dir":                "/var/lib/kubelet",
@@ -446,28 +448,39 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 	}
 }
 
-func getNginxPodTemplate(nodeName string) string {
+func getHTTPServerTemplate(podName, nodeName string) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
-  name: %[1]s-nginx
-  namespace: default
+  name: %s
 spec:
   containers:
-  - name: nginx
-    image: mcr.microsoft.com/oss/nginx/nginx:1.21.6
+  - name: mariner
+    image: mcr.microsoft.com/cbl-mariner/busybox:2.0
     imagePullPolicy: IfNotPresent
+    command: ["sh", "-c"]
+    args:
+    - |
+      mkdir -p /www &&
+      echo '<!DOCTYPE html><html><head><title></title></head><body></body></html>' > /www/index.html &&
+      httpd -f -p 80 -h /www
+    ports:
+    - containerPort: 80
   nodeSelector:
-    kubernetes.io/hostname: %[1]s
-`, nodeName)
+    kubernetes.io/hostname: %s
+  readinessProbe:
+      periodSeconds: 1
+      httpGet:
+        path: /
+        port: 80
+`, podName, nodeName)
 }
 
-func getWasmSpinPodTemplate(nodeName string) string {
+func getWasmSpinPodTemplate(podName, nodeName string) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Pod
 metadata:
-  name: %[1]s-wasm-spin
-  namespace: default
+  name: %s
 spec:
   runtimeClassName: wasmtime-spin
   containers:
@@ -482,32 +495,12 @@ spec:
       requests:
         cpu: 100m
         memory: 128Mi
+    readinessProbe:
+      periodSeconds: 1
+      httpGet:
+        path: /hello
+        port: 80
   nodeSelector:
-    kubernetes.io/hostname: %[1]s
-`, nodeName)
-}
-
-func getWasmSlightPodTemplate(nodeName string) string {
-	return fmt.Sprintf(`apiVersion: v1
-kind: Pod
-metadata:
-  name: %[1]s-wasm-slight
-  namespace: default
-spec:
-  runtimeClassName: wasmtime-slight
-  containers:
-  - name: slight-hello
-    image: ghcr.io/deislabs/containerd-wasm-shims/examples/slight-rust-hello:v0.5.1
-    imagePullPolicy: IfNotPresent
-    command: ["/"]
-    resources: # limit the resources to 128Mi of memory and 100m of CPU
-      limits:
-        cpu: 100m
-        memory: 128Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
-  nodeSelector:
-    kubernetes.io/hostname: %[1]s
-`, nodeName)
+    kubernetes.io/hostname: %s
+`, podName, nodeName)
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/Azure/agentbaker/pkg/agent/datamodel"
 	"github.com/Azure/agentbakere2e/config"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/barkimedes/go-deepcopy"
 	"github.com/stretchr/testify/require"
 )
@@ -148,6 +148,11 @@ type LiveVMValidator struct {
 	// IsShellBuiltIn is a boolean flag which indicates whether or not the command is a shell built-in
 	// that will fail when executed with sudo - requires separate command to avoid command not found error on node
 	IsShellBuiltIn bool
+
+	// TODO - extract this out of LiveVMValidator into a separate Pod level validator
+	// IsPodNetwork is a boolean flags which indicates whether or not the validator should run on a pod that is NOT using
+	// host's network interface. For example when testing connectivity from user pods to certain endpoints, we will set it to true
+	IsPodNetwork bool
 }
 
 // PrepareNodeBootstrappingConfiguration mutates the input NodeBootstrappingConfiguration by calling the
@@ -189,17 +194,17 @@ func (s *Scenario) PrepareVMSSModel(ctx context.Context, t *testing.T, vmss *arm
 	}
 
 	// don't clean up VMSS in other tests
-	if config.KeepVMSS {
+	if config.Config.KeepVMSS {
 		if vmss.Tags == nil {
 			vmss.Tags = map[string]*string{}
 		}
 		vmss.Tags["KEEP_VMSS"] = to.Ptr("true")
 	}
 
-	if config.BuildID != "" {
+	if config.Config.BuildID != "" {
 		if vmss.Tags == nil {
 			vmss.Tags = map[string]*string{}
 		}
-		vmss.Tags[buildIDTagKey] = &config.BuildID
+		vmss.Tags[buildIDTagKey] = &config.Config.BuildID
 	}
 }

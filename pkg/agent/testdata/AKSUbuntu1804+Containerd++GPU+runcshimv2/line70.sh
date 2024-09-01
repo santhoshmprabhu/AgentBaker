@@ -128,6 +128,7 @@ configureHTTPProxyCA() {
         cert_dest="/usr/local/share/ca-certificates"
         update_cmd="update-ca-certificates"
     fi
+    HTTP_PROXY_TRUSTED_CA=$(echo "${HTTP_PROXY_TRUSTED_CA}" | xargs)
     echo "${HTTP_PROXY_TRUSTED_CA}" | base64 -d > "${cert_dest}/proxyCA.crt" || exit $ERR_UPDATE_CA_CERTS
     $update_cmd || exit $ERR_UPDATE_CA_CERTS
 }
@@ -174,6 +175,8 @@ configureK8s() {
     chown root:root "${AZURE_JSON_PATH}"
 
     mkdir -p "/etc/kubernetes/certs"
+
+    set +x
     if [ -n "${KUBELET_CLIENT_CONTENT}" ]; then
         echo "${KUBELET_CLIENT_CONTENT}" | base64 -d > /etc/kubernetes/certs/client.key
     fi
@@ -184,7 +187,6 @@ configureK8s() {
         echo "${SERVICE_PRINCIPAL_FILE_CONTENT}" | base64 -d > /etc/kubernetes/sp.txt
     fi
 
-    set +x
     echo "${APISERVER_PUBLIC_KEY}" | base64 --decode > "${APISERVER_PUBLIC_KEY_PATH}"
     SP_FILE="/etc/kubernetes/sp.txt"
     SERVICE_PRINCIPAL_CLIENT_SECRET="$(cat "$SP_FILE")"
@@ -237,7 +239,10 @@ EOF
         sed -i "/cloudProviderBackoffJitter/d" /etc/kubernetes/azure.json
     fi
 
-    configureKubeletServerCert
+    if [ "${ENABLE_KUBELET_SERVING_CERTIFICATE_ROTATION}" != "true" ]; then
+        configureKubeletServerCert
+    fi
+
     if [ "${IS_CUSTOM_CLOUD}" == "true" ]; then
         set +x
         AKS_CUSTOM_CLOUD_JSON_PATH="/etc/kubernetes/${TARGET_ENVIRONMENT}.json"
@@ -387,6 +392,11 @@ ensureDHCPv6() {
 ensureKubelet() {
     KUBELET_DEFAULT_FILE=/etc/default/kubelet
     mkdir -p /etc/default
+
+    if semverCompare ${KUBERNETES_VERSION:-"0.0.0"} "1.29.0"; then
+        logs_to_events "AKS.CSE.ensureKubelet.setKubeletNodeIPFlag" setKubeletNodeIPFlag
+    fi
+
     echo "KUBELET_FLAGS=${KUBELET_FLAGS}" > "${KUBELET_DEFAULT_FILE}"
     echo "KUBELET_REGISTER_SCHEDULABLE=true" >> "${KUBELET_DEFAULT_FILE}"
     echo "NETWORK_POLICY=${NETWORK_POLICY}" >> "${KUBELET_DEFAULT_FILE}"
@@ -507,6 +517,7 @@ EOF
 #
 #
 iptables -I FORWARD -d 168.63.129.16 -p tcp --dport 80 -j DROP
+iptables -I FORWARD -d 168.63.129.16 -p tcp --dport 32526 -j DROP
 EOF
 
     if [[ $KUBELET_FLAGS == *"image-credential-provider-config"* && $KUBELET_FLAGS == *"image-credential-provider-bin-dir"* ]]; then
@@ -814,6 +825,22 @@ disableIMDSRestriction() {
     else
         echo "Deleting IMDS restriction rule from filter table..."
         iptables -t filter -D FORWARD ! -s $primaryNicIP -d 169.254.169.254/32 -p tcp -m tcp --dport 80 -m comment --comment "AKS managed: added by AgentBaker esnureIMDSRestriction for IMDS restriction feature" -j DROP || exit $ERR_DELETE_IMDS_RESTRICTION_RULE_FROM_FILTER_TABLE
+    fi
+}
+
+setKubeletNodeIPFlag() {
+    imdsOutput=$(curl -s -H Metadata:true --noproxy "*" --max-time 5 "http://169.254.169.254/metadata/instance/network/interface?api-version=2021-02-01" 2> /dev/null)
+    if [[ $? -eq 0 ]]; then
+        nodeIPAddrs=()
+        ipv4Addr=$(echo $imdsOutput | jq -r '.[0].ipv4.ipAddress[0].privateIpAddress // ""')
+        [ -n "$ipv4Addr" ] && nodeIPAddrs+=("$ipv4Addr")
+        ipv6Addr=$(echo $imdsOutput | jq -r '.[0].ipv6.ipAddress[0].privateIpAddress // ""')
+        [ -n "$ipv6Addr" ] && nodeIPAddrs+=("$ipv6Addr")
+        nodeIPArg=$(IFS=, ; echo "${nodeIPAddrs[*]}") 
+        if [ -n "$nodeIPArg" ]; then
+            echo "Adding --node-ip=$nodeIPArg to kubelet flags"
+            KUBELET_FLAGS="$KUBELET_FLAGS --node-ip=$nodeIPArg"
+        fi
     fi
 }
 

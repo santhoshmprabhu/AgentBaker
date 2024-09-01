@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"strings"
 )
 
@@ -25,7 +27,7 @@ func DirectoryValidator(path string, files []string) *LiveVMValidator {
 
 func SysctlConfigValidator(customSysctls map[string]string) *LiveVMValidator {
 	keysToCheck := make([]string, len(customSysctls))
-	for k, _ := range customSysctls {
+	for k := range customSysctls {
 		keysToCheck = append(keysToCheck, k)
 	}
 	// regex used in sed command to remove extra spaces between two numerical values, used to verify correct values for
@@ -125,6 +127,19 @@ func FileHasContentsValidator(fileName string, contents string) *LiveVMValidator
 	}
 }
 
+func FileExcludesContentsValidator(fileName string, contents string, contentsName string) *LiveVMValidator {
+	return &LiveVMValidator{
+		Description: fmt.Sprintf("assert %s does not contain %s", fileName, contentsName),
+		Command:     fmt.Sprintf("grep -q -F '%s' '%s'", contents, fileName),
+		Asserter: func(code, stdout, stderr string) error {
+			if code == "0" {
+				return fmt.Errorf("expected to find a file '%s' without %s but did not", fileName, contentsName)
+			}
+			return nil
+		},
+	}
+}
+
 // this function is just used to remove some bash specific tokens so we can echo the command to stdout.
 func cleanse(str string) string {
 	str = strings.Replace(str, "'", "", -1)
@@ -149,7 +164,7 @@ func makeExecutableCommand(steps []string) string {
 	return command
 }
 
-func serviceCanRestartValidator(serviceName string, restartTimeoutInSeconds int) *LiveVMValidator {
+func ServiceCanRestartValidator(serviceName string, restartTimeoutInSeconds int) *LiveVMValidator {
 	steps := []string{
 		// Verify the service is active - print the state then verify so we have logs
 		fmt.Sprintf("(systemctl -n 5 status %s || true)", serviceName),
@@ -184,7 +199,30 @@ func serviceCanRestartValidator(serviceName string, restartTimeoutInSeconds int)
 		Command:     command,
 		Asserter: func(code, stdout, stderr string) error {
 			if code != "0" {
-				return fmt.Errorf("service kill and check terminated with exit code %q (expected 0).\nCommand: %s\n\nStdout:\n%s\n\n Stderr:\n%s\n", code, command, stdout, stderr)
+				return fmt.Errorf("service kill and check terminated with exit code %q (expected 0).\nCommand: %s\n\nStdout:\n%s\n\n Stderr:\n%s", code, command, stdout, stderr)
+			}
+			return nil
+		},
+	}
+}
+
+func CommandHasOutputValidator(commandToExecute string, expectedOutput string) *LiveVMValidator {
+	steps := []string{
+		// Verify the service is active - print the state then verify so we have logs
+		fmt.Sprint(commandToExecute),
+	}
+
+	command := makeExecutableCommand(steps)
+
+	return &LiveVMValidator{
+		Description: fmt.Sprintf("asserts that %s has output %s", commandToExecute, expectedOutput),
+		Command:     command,
+		Asserter: func(code, stdout, stderr string) error {
+			if !strings.Contains(stderr, expectedOutput) {
+				return fmt.Errorf("'%s' output did not contain expected string Stdout:\n%s\n\n Stderr:\n%s", command, stdout, stderr)
+			}
+			if code != "0" {
+				return fmt.Errorf("command failed with exit code %q (expected 0).\nCommand: %s\n\nStdout:\n%s\n\n Stderr:\n%s", code, command, stdout, stderr)
 			}
 			return nil
 		},
@@ -226,6 +264,58 @@ func containerdVersionValidator(version string) *LiveVMValidator {
 			if !strings.Contains(stdout, version) {
 				return fmt.Errorf(fmt.Sprintf("expected to find containerd version %s, got: %s", version, stdout))
 			}
+			return nil
+		},
+	}
+}
+
+func runcVersionValidator(version string) *LiveVMValidator {
+	return &LiveVMValidator{
+		Description: "assert runc version",
+		Command:     "runc --version",
+		Asserter: func(code, stdout, stderr string) error {
+			if code != "0" {
+				return fmt.Errorf("validator command terminated with exit code %q but expected code 0", code)
+			}
+
+			// runc output
+			if !strings.Contains(stdout, "runc version "+version) {
+				return fmt.Errorf(fmt.Sprintf("expected to find runc version %s, got: %s", version, stdout))
+			}
+			return nil
+		},
+	}
+}
+
+// K8s 1.29+ should set --node-ip in kubelet flags due to behavior change in
+// https://github.com/kubernetes/kubernetes/pull/121028
+func kubeletNodeIPValidator() *LiveVMValidator {
+	return &LiveVMValidator{
+		Description: "assert /etc/default/kubelet has --node-ip flag set",
+		Command:     "cat /etc/default/kubelet",
+		Asserter: func(code, stdout, stderr string) error {
+			if code != "0" {
+				return fmt.Errorf("validator command terminated with exit code %q but expected code 0", code)
+			}
+
+			// Search for "--node-ip" flag and its value.
+			matches := regexp.MustCompile(`--node-ip=([a-zA-Z0-9.,]*)`).FindStringSubmatch(stdout)
+			if matches == nil || len(matches) < 2 {
+				return fmt.Errorf("could not find kubelet flag --node-ip")
+			}
+
+			ipAddresses := strings.Split(matches[1], ",") // Could be multiple for dual-stack.
+			if len(ipAddresses) == 0 || len(ipAddresses) > 2 {
+				return fmt.Errorf("expected one or two --node-ip addresses, but got %d", len(ipAddresses))
+			}
+
+			// Check that each IP is a valid address.
+			for _, ipAddress := range ipAddresses {
+				if parsedIP := net.ParseIP(ipAddress); parsedIP == nil {
+					return fmt.Errorf("--node-ip value %q is not a valid IP address", ipAddress)
+				}
+			}
+
 			return nil
 		},
 	}

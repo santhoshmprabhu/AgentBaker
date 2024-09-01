@@ -9,8 +9,8 @@ import (
 
 	"github.com/Azure/agentbakere2e/config"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v6"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
 )
 
 func getKubenetClusterModel(name string) *armcontainerservice.ManagedCluster {
@@ -33,13 +33,13 @@ func getAzureNetworkClusterModel(name string) *armcontainerservice.ManagedCluste
 func getBaseClusterModel(clusterName string) *armcontainerservice.ManagedCluster {
 	return &armcontainerservice.ManagedCluster{
 		Name:     to.Ptr(clusterName),
-		Location: to.Ptr(config.Location),
+		Location: to.Ptr(config.Config.Location),
 		Properties: &armcontainerservice.ManagedClusterProperties{
 			DNSPrefix: to.Ptr(clusterName),
 			AgentPoolProfiles: []*armcontainerservice.ManagedClusterAgentPoolProfile{
 				{
 					Name:         to.Ptr("nodepool1"),
-					Count:        to.Ptr[int32](2),
+					Count:        to.Ptr[int32](1),
 					VMSize:       to.Ptr("standard_d2ds_v5"),
 					MaxPods:      to.Ptr[int32](110),
 					OSType:       to.Ptr(armcontainerservice.OSTypeLinux),
@@ -47,6 +47,10 @@ func getBaseClusterModel(clusterName string) *armcontainerservice.ManagedCluster
 					Mode:         to.Ptr(armcontainerservice.AgentPoolModeSystem),
 					OSDiskSizeGB: to.Ptr[int32](512),
 				},
+			},
+			AutoUpgradeProfile: &armcontainerservice.ManagedClusterAutoUpgradeProfile{
+				NodeOSUpgradeChannel: to.Ptr(armcontainerservice.NodeOSUpgradeChannelNodeImage),
+				UpgradeChannel:       to.Ptr(armcontainerservice.UpgradeChannelNone),
 			},
 			NetworkProfile: &armcontainerservice.NetworkProfile{
 				NetworkPlugin: to.Ptr(armcontainerservice.NetworkPluginKubenet),
@@ -67,7 +71,7 @@ func addAirgapNetworkSettings(ctx context.Context, t *testing.T, cluster *Cluste
 	}
 	subnetId := vnet.subnetId
 
-	nsgParams, err := airGapSecurityGroup(config.Location, *cluster.Model.Properties.Fqdn)
+	nsgParams, err := airGapSecurityGroup(config.Config.Location, *cluster.Model.Properties.Fqdn)
 	if err != nil {
 		return err
 	}
@@ -132,7 +136,7 @@ func airGapSecurityGroup(location, clusterFQDN string) (armnetwork.SecurityGroup
 
 	return armnetwork.SecurityGroup{
 		Location:   &location,
-		Name:       &config.AirgapNSGName,
+		Name:       &config.Config.AirgapNSGName,
 		Properties: &armnetwork.SecurityGroupPropertiesFormat{SecurityRules: rules},
 	}, nil
 }
@@ -182,11 +186,11 @@ func getSecurityRule(name, destinationAddressPrefix string, priority int32) *arm
 }
 
 func createAirgapSecurityGroup(ctx context.Context, cluster *armcontainerservice.ManagedCluster, nsgParams armnetwork.SecurityGroup, options *armnetwork.SecurityGroupsClientBeginCreateOrUpdateOptions) (*armnetwork.SecurityGroupsClientCreateOrUpdateResponse, error) {
-	poller, err := config.Azure.SecurityGroup.BeginCreateOrUpdate(ctx, *cluster.Properties.NodeResourceGroup, config.AirgapNSGName, nsgParams, options)
+	poller, err := config.Azure.SecurityGroup.BeginCreateOrUpdate(ctx, *cluster.Properties.NodeResourceGroup, config.Config.AirgapNSGName, nsgParams, options)
 	if err != nil {
 		return nil, err
 	}
-	nsg, err := poller.PollUntilDone(ctx, nil)
+	nsg, err := poller.PollUntilDone(ctx, config.DefaultPollUntilDoneOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -194,11 +198,11 @@ func createAirgapSecurityGroup(ctx context.Context, cluster *armcontainerservice
 }
 
 func updateSubnet(ctx context.Context, cluster *armcontainerservice.ManagedCluster, subnetParameters armnetwork.Subnet, vnetName string) error {
-	poller, err := config.Azure.Subnet.BeginCreateOrUpdate(ctx, *cluster.Properties.NodeResourceGroup, vnetName, config.DefaultSubnetName, subnetParameters, nil)
+	poller, err := config.Azure.Subnet.BeginCreateOrUpdate(ctx, *cluster.Properties.NodeResourceGroup, vnetName, config.Config.DefaultSubnetName, subnetParameters, nil)
 	if err != nil {
 		return err
 	}
-	_, err = poller.PollUntilDone(ctx, nil)
+	_, err = poller.PollUntilDone(ctx, config.DefaultPollUntilDoneOptions)
 	if err != nil {
 		return err
 	}

@@ -1836,6 +1836,14 @@ type AKSKubeletConfiguration struct {
 	Default: false
 	+optional. */
 	RotateCertificates bool `json:"rotateCertificates,omitempty"`
+	// serverTLSBootstrap enables server certificate bootstrap. Instead of self
+	// signing a serving certificate, the Kubelet will request a certificate from
+	// the 'certificates.k8s.io' API. This requires an approver to approve the
+	// certificate signing requests (CSR). The RotateKubeletServerCertificate feature
+	// must be enabled when setting this field.
+	// Default: false
+	// +optional
+	ServerTLSBootstrap bool `json:"serverTLSBootstrap,omitempty"`
 	/* authentication specifies how requests to the Kubelet's server are authenticated
 	Dynamic Kubelet Config (beta): If dynamically updating this field, consider that
 	it may disrupt components that interact with the Kubelet server.
@@ -2088,6 +2096,13 @@ type AKSKubeletConfiguration struct {
 	Default: []
 	+optional. */
 	AllowedUnsafeSysctls []string `json:"allowedUnsafeSysctls,omitempty"`
+	// serializeImagePulls when enabled, tells the Kubelet to pull images one
+	// at a time. We recommend *not* changing the default value on nodes that
+	// run docker daemon with version  < 1.9 or an Aufs storage backend.
+	// Issue #10959 has more details.
+	// Default: true
+	// +optional
+	SerializeImagePulls *bool `json:"serializeImagePulls,omitempty"`
 }
 
 type Duration string
@@ -2238,6 +2253,13 @@ type PrivateEgress struct {
 func (s *SecurityProfile) GetProxyAddress() string {
 	if s != nil && s.PrivateEgress != nil && s.PrivateEgress.Enabled {
 		return s.PrivateEgress.ProxyAddress
+	}
+	return ""
+}
+
+func (s *SecurityProfile) GetPrivateEgressContainerRegistryServer() string {
+	if s != nil && s.PrivateEgress != nil && s.PrivateEgress.Enabled {
+		return s.PrivateEgress.ContainerRegistryServer
 	}
 	return ""
 }

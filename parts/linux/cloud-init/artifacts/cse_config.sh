@@ -134,6 +134,7 @@ configureHTTPProxyCA() {
         cert_dest="/usr/local/share/ca-certificates"
         update_cmd="update-ca-certificates"
     fi
+    HTTP_PROXY_TRUSTED_CA=$(echo "${HTTP_PROXY_TRUSTED_CA}" | xargs)
     echo "${HTTP_PROXY_TRUSTED_CA}" | base64 -d > "${cert_dest}/proxyCA.crt" || exit $ERR_UPDATE_CA_CERTS
     $update_cmd || exit $ERR_UPDATE_CA_CERTS
 }
@@ -163,6 +164,7 @@ EOF
   systemctl restart containerd
 }
 
+# this simply generates a self-signed certificate used for serving by the kubelet
 configureKubeletServerCert() {
     KUBELET_SERVER_PRIVATE_KEY_PATH="/etc/kubernetes/certs/kubeletserver.key"
     KUBELET_SERVER_CERT_PATH="/etc/kubernetes/certs/kubeletserver.crt"
@@ -183,6 +185,8 @@ configureK8s() {
     chown root:root "${AZURE_JSON_PATH}"
 
     mkdir -p "/etc/kubernetes/certs"
+
+    set +x
     if [ -n "${KUBELET_CLIENT_CONTENT}" ]; then
         echo "${KUBELET_CLIENT_CONTENT}" | base64 -d > /etc/kubernetes/certs/client.key
     fi
@@ -193,7 +197,6 @@ configureK8s() {
         echo "${SERVICE_PRINCIPAL_FILE_CONTENT}" | base64 -d > /etc/kubernetes/sp.txt
     fi
 
-    set +x
     echo "${APISERVER_PUBLIC_KEY}" | base64 --decode > "${APISERVER_PUBLIC_KEY_PATH}"
     SP_FILE="/etc/kubernetes/sp.txt"
     SERVICE_PRINCIPAL_CLIENT_SECRET="$(cat "$SP_FILE")"
@@ -246,7 +249,12 @@ EOF
         sed -i "/cloudProviderBackoffJitter/d" /etc/kubernetes/azure.json
     fi
 
-    configureKubeletServerCert
+    # generate a kubelet serving certificate if we aren't relying on 
+    # TLS bootstrapping to generate one for us
+    if [ "${ENABLE_KUBELET_SERVING_CERTIFICATE_ROTATION}" != "true" ]; then
+        configureKubeletServerCert
+    fi
+
     if [ "${IS_CUSTOM_CLOUD}" == "true" ]; then
         set +x
         AKS_CUSTOM_CLOUD_JSON_PATH="/etc/kubernetes/${TARGET_ENVIRONMENT}.json"
@@ -397,6 +405,18 @@ ensureDHCPv6() {
 ensureKubelet() {
     KUBELET_DEFAULT_FILE=/etc/default/kubelet
     mkdir -p /etc/default
+
+    # In k8s >= 1.29 kubelet no longer sets node internalIP when using external cloud provider
+    # https://github.com/kubernetes/kubernetes/pull/121028
+    # This regresses node startup performance in Azure CNI Overlay and Podsubnet clusters, which require the node to be
+    # assigned an internal IP before configuring pod networking.
+    # To improve node startup performance, explicitly set `--node-ip` to the IP returned from IMDS so kubelet sets
+    # the internal IP when it registers the node.
+    # If this fails, skip setting --node-ip, which is safe because cloud-node-manager will assign it later anyway.
+    if semverCompare ${KUBERNETES_VERSION:-"0.0.0"} "1.29.0"; then
+        logs_to_events "AKS.CSE.ensureKubelet.setKubeletNodeIPFlag" setKubeletNodeIPFlag
+    fi
+
     echo "KUBELET_FLAGS=${KUBELET_FLAGS}" > "${KUBELET_DEFAULT_FILE}"
     echo "KUBELET_REGISTER_SCHEDULABLE=true" >> "${KUBELET_DEFAULT_FILE}"
     echo "NETWORK_POLICY=${NETWORK_POLICY}" >> "${KUBELET_DEFAULT_FILE}"
@@ -517,12 +537,15 @@ EOF
 # for TCP protocol (which http uses)
 #
 # 168.63.129.16 contains protected settings that have priviledged info.
+# HostGAPlugin (Host-GuestAgent-Plugin) is a web server process that runs on the physical host that serves the operational and diagnostic needs of the in-VM Guest Agent.
+# IT listens on both port 80 and 32526 hence access is only needed for agent but not the containers.
 #
 # The host can still reach 168.63.129.16 because it goes through the OUTPUT chain, not FORWARD.
 #
 # Note: we should not block all traffic to 168.63.129.16. For example UDP traffic is still needed
 # for DNS.
 iptables -I FORWARD -d 168.63.129.16 -p tcp --dport 80 -j DROP
+iptables -I FORWARD -d 168.63.129.16 -p tcp --dport 32526 -j DROP
 EOF
 
     # check if kubelet flags contain image-credential-provider-config and image-credential-provider-bin-dir
@@ -838,6 +861,22 @@ disableIMDSRestriction() {
     else
         echo "Deleting IMDS restriction rule from filter table..."
         iptables -t filter -D FORWARD ! -s $primaryNicIP -d 169.254.169.254/32 -p tcp -m tcp --dport 80 -m comment --comment "AKS managed: added by AgentBaker esnureIMDSRestriction for IMDS restriction feature" -j DROP || exit $ERR_DELETE_IMDS_RESTRICTION_RULE_FROM_FILTER_TABLE
+    fi
+}
+
+setKubeletNodeIPFlag() {
+    imdsOutput=$(curl -s -H Metadata:true --noproxy "*" --max-time 5 "http://169.254.169.254/metadata/instance/network/interface?api-version=2021-02-01" 2> /dev/null)
+    if [[ $? -eq 0 ]]; then
+        nodeIPAddrs=()
+        ipv4Addr=$(echo $imdsOutput | jq -r '.[0].ipv4.ipAddress[0].privateIpAddress // ""')
+        [ -n "$ipv4Addr" ] && nodeIPAddrs+=("$ipv4Addr")
+        ipv6Addr=$(echo $imdsOutput | jq -r '.[0].ipv6.ipAddress[0].privateIpAddress // ""')
+        [ -n "$ipv6Addr" ] && nodeIPAddrs+=("$ipv6Addr")
+        nodeIPArg=$(IFS=, ; echo "${nodeIPAddrs[*]}") # join, comma-separated
+        if [ -n "$nodeIPArg" ]; then
+            echo "Adding --node-ip=$nodeIPArg to kubelet flags"
+            KUBELET_FLAGS="$KUBELET_FLAGS --node-ip=$nodeIPArg"
+        fi
     fi
 }
 

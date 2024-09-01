@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,88 +12,55 @@ import (
 
 func validateNodeHealth(ctx context.Context, t *testing.T, kube *Kubeclient, vmssName string) string {
 	nodeName := waitUntilNodeReady(ctx, t, kube, vmssName)
-
-	nginxPodName, err := ensureTestNginxPod(ctx, kube, nodeName)
-	require.NoError(t, err, "failed to validate node health, unable to ensure nginx pod on node %q", nodeName)
-
-	err = waitUntilPodDeleted(ctx, kube, nginxPodName)
-	require.NoError(t, err, "error waiting for nginx pod deletion on %s", nodeName)
-
+	testPodName := fmt.Sprintf("test-pod-%s", nodeName)
+	testPodManifest := getHTTPServerTemplate(testPodName, nodeName)
+	err := ensurePod(ctx, t, defaultNamespace, kube, testPodName, testPodManifest)
+	require.NoError(t, err, "failed to validate node health, unable to ensure test pod on node %q", nodeName)
 	return nodeName
 }
 
-func validateWasm(ctx context.Context, t *testing.T, kube *Kubeclient, nodeName, privateKey string) error {
-	spinPodName, err := ensureWasmPods(ctx, kube, nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to valiate wasm, unable to ensure wasm pods on node %q: %w", nodeName, err)
-	}
-
-	spinPodIP, err := getPodIP(ctx, kube, defaultNamespace, spinPodName)
-	if err != nil {
-		return fmt.Errorf("on node %s unable to get IP of wasm spin pod %q: %w", nodeName, spinPodName, err)
-	}
-
-	debugPodName, err := getDebugPodName(ctx, kube)
-	if err != nil {
-		return fmt.Errorf("on node %s unable to get debug pod name to validate wasm: %w", nodeName, err)
-	}
-
-	execResult, err := pollExecOnPod(ctx, t, kube, defaultNamespace, debugPodName, getWasmCurlCommand(fmt.Sprintf("http://%s/hello", spinPodIP)))
-	if err != nil {
-		return fmt.Errorf("on node %sunable to execute wasm validation command: %w", nodeName, err)
-	}
-
-	if execResult.exitCode != "0" {
-		// retry getting the pod IP + curling the hello endpoint if the original curl reports connection refused or a timeout
-		// since the wasm spin pod usually restarts at least once after initial creation, giving it a new IP
-		if execResult.exitCode == "7" || execResult.exitCode == "28" {
-			spinPodIP, err = getPodIP(ctx, kube, defaultNamespace, spinPodName)
-			if err != nil {
-				return fmt.Errorf(" on node %s unable to get IP of wasm spin pod %q: %w", nodeName, spinPodName, err)
-			}
-
-			execResult, err = pollExecOnPod(ctx, t, kube, defaultNamespace, debugPodName, getWasmCurlCommand(fmt.Sprintf("http://%s/hello", spinPodIP)))
-			if err != nil {
-				return fmt.Errorf("unable to execute on node %s wasm validation command on wasm pod %q at %s: %w", nodeName, spinPodName, spinPodIP, err)
-			}
-
-			if execResult.exitCode != "0" {
-				execResult.dumpAll(t)
-				return fmt.Errorf("curl  on node %swasm endpoint on pod %q at %s terminated with exit code %s", nodeName, spinPodName, spinPodIP, execResult.exitCode)
-			}
-		} else {
-			execResult.dumpAll(t)
-			return fmt.Errorf("curl  on node %swasm endpoint on pod %q at %s terminated with exit code %s", nodeName, spinPodName, spinPodIP, execResult.exitCode)
-		}
-	}
-
-	if err := waitUntilPodDeleted(ctx, kube, spinPodName); err != nil {
-		return fmt.Errorf("error waiting for wasm pod deletion on %s: %w", nodeName, err)
-	}
-
-	return nil
+func validateWasm(ctx context.Context, t *testing.T, kube *Kubeclient, nodeName string) {
+	t.Logf("wasm scenario: running wasm validation on %s...", nodeName)
+	spinClassName := fmt.Sprintf("wasmtime-%s", wasmHandlerSpin)
+	err := createRuntimeClass(ctx, kube, spinClassName, wasmHandlerSpin)
+	require.NoError(t, err)
+	err = ensureWasmRuntimeClasses(ctx, kube)
+	require.NoError(t, err)
+	spinPodName := fmt.Sprintf("wasm-spin-%s", nodeName)
+	spinPodManifest := getWasmSpinPodTemplate(spinPodName, nodeName)
+	err = ensurePod(ctx, t, defaultNamespace, kube, spinPodName, spinPodManifest)
+	require.NoError(t, err, "unable to ensure wasm pod on node %q", nodeName)
 }
 
 func runLiveVMValidators(ctx context.Context, t *testing.T, vmssName, privateIP, sshPrivateKey string, opts *scenarioRunOpts) error {
-	podName, err := getDebugPodName(ctx, opts.clusterConfig.Kube)
+	hostPodName, err := getHostNetworkDebugPodName(ctx, opts.clusterConfig.Kube)
 	if err != nil {
-		return fmt.Errorf("While running live validator for node %s, unable to get debug pod name: %w", vmssName, err)
+		return fmt.Errorf("while running live validator for node %s, unable to get debug pod name: %w", vmssName, err)
 	}
 
-	validators := commonLiveVMValidators()
+	nonHostPodName, err := getPodNetworkDebugPodNameForVMSS(ctx, opts.clusterConfig.Kube, vmssName)
+	if err != nil {
+		return fmt.Errorf("while running live validator for node %s, unable to get non host debug pod name: %w", vmssName, err)
+	}
+
+	validators := commonLiveVMValidators(opts)
 	if opts.scenario.LiveVMValidators != nil {
 		validators = append(validators, opts.scenario.LiveVMValidators...)
 	}
 
 	for _, validator := range validators {
-		desc := validator.Description
-		command := validator.Command
-		isShellBuiltIn := validator.IsShellBuiltIn
-		t.Logf("running live VM validator on %s: %q", vmssName, desc)
+		t.Logf("running live VM validator on %s: %q", vmssName, validator.Description)
 
-		execResult, err := pollExecOnVM(ctx, t, opts.clusterConfig.Kube, privateIP, podName, sshPrivateKey, command, isShellBuiltIn)
+		var execResult *podExecResult
+		var err error
+		// Non Host Validators - meaning we want to execute checks through a pod which is NOT connected to host's network
+		if validator.IsPodNetwork {
+			execResult, err = execOnUnprivilegedPod(ctx, opts.clusterConfig.Kube, "default", nonHostPodName, validator.Command)
+		} else {
+			execResult, err = execOnVM(ctx, opts.clusterConfig.Kube, privateIP, hostPodName, sshPrivateKey, validator.Command, validator.IsShellBuiltIn)
+		}
 		if err != nil {
-			return fmt.Errorf("unable to execute validator on node %s command %q: %w", vmssName, command, err)
+			return fmt.Errorf("unable to execute validator on node %s command %q: %w", vmssName, validator.Command, err)
 		}
 
 		if validator.Asserter != nil {
@@ -107,8 +75,8 @@ func runLiveVMValidators(ctx context.Context, t *testing.T, vmssName, privateIP,
 	return nil
 }
 
-func commonLiveVMValidators() []*LiveVMValidator {
-	return []*LiveVMValidator{
+func commonLiveVMValidators(opts *scenarioRunOpts) []*LiveVMValidator {
+	validators := []*LiveVMValidator{
 		{
 			Description: "assert /etc/default/kubelet should not contain dynamic config dir flag",
 			Command:     "cat /etc/default/kubelet",
@@ -144,5 +112,61 @@ func commonLiveVMValidators() []*LiveVMValidator {
 				"cloud-config.txt",
 			},
 		),
+		// this check will run from host's network - we expect it to succeed
+		{
+			Description: "check that curl to wireserver succeeds from host's network",
+			Command:     "curl http://168.63.129.16:32526/vmSettings",
+			Asserter: func(code, stdout, stderr string) error {
+				if code != "0" {
+					return fmt.Errorf("validator command terminated with exit code %q but expected code 0 (succeeded)", code)
+				}
+				return nil
+			},
+		},
+		// CURL goes to port 443 by default for HTTPS
+		{
+			Description: "check that curl to wireserver fails",
+			Command:     "curl https://168.63.129.16/machine/?comp=goalstate -H 'x-ms-version: 2015-04-05' -s --connect-timeout 4",
+			Asserter: func(code, stdout, stderr string) error {
+				if code != "28" {
+					return fmt.Errorf("validator command terminated with exit code %q but expected code 28 (CURL timeout)", code)
+				}
+				return nil
+			},
+			IsPodNetwork: true,
+		},
+		{
+			Description: "check that curl to wireserver port 32526 fails",
+			Command:     "curl http://168.63.129.16:32526/vmSettings --connect-timeout 4",
+			Asserter: func(code, stdout, stderr string) error {
+				if code != "28" {
+					return fmt.Errorf("validator command terminated with exit code %q but expected code 28 (CURL timeout)", code)
+				}
+				return nil
+			},
+			IsPodNetwork: true,
+		},
+	}
+	validators = append(validators, leakedSecretsValidators(opts)...)
+	return validators
+}
+
+func leakedSecretsValidators(opts *scenarioRunOpts) []*LiveVMValidator {
+	logPath := "/var/log/azure/cluster-provision.log"
+	clientPrivateKey := opts.nbc.ContainerService.Properties.CertificateProfile.ClientPrivateKey
+	spSecret := opts.nbc.ContainerService.Properties.ServicePrincipalProfile.Secret
+	bootstrapToken := *opts.nbc.KubeletClientTLSBootstrapToken
+
+	b64Encoded := func(val string) string {
+		return base64.StdEncoding.EncodeToString([]byte(val))
+	}
+	return []*LiveVMValidator{
+		// Base64 encoded in baker.go (GetKubeletClientKey)
+		FileExcludesContentsValidator(logPath, b64Encoded(clientPrivateKey), "client private key"),
+		// Base64 encoded in baker.go (GetServicePrincipalSecret)
+		FileExcludesContentsValidator(logPath, b64Encoded(spSecret), "service principal secret"),
+		// Bootstrap token is already encoded so we don't need to
+		// encode it again here.
+		FileExcludesContentsValidator(logPath, bootstrapToken, "bootstrap token"),
 	}
 }

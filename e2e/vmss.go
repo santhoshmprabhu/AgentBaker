@@ -18,7 +18,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -30,8 +30,6 @@ const (
 )
 
 func createVMSS(ctx context.Context, t *testing.T, vmssName string, opts *scenarioRunOpts, privateKeyBytes []byte, publicKeyBytes []byte) *armcompute.VirtualMachineScaleSet {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
 	t.Logf("creating VMSS %q in resource group %q", vmssName, *opts.clusterConfig.Model.Properties.NodeResourceGroup)
 	nodeBootstrapping, err := getNodeBootstrapping(ctx, opts.nbc)
 	require.NoError(t, err)
@@ -42,7 +40,7 @@ func createVMSS(ctx context.Context, t *testing.T, vmssName string, opts *scenar
 	require.NoError(t, err, vmssName, opts)
 
 	if isAzureCNI {
-		err = addPodIPConfigsForAzureCNI(ctx, &model, vmssName, opts)
+		err = addPodIPConfigsForAzureCNI(&model, vmssName, opts)
 		require.NoError(t, err)
 	}
 
@@ -61,9 +59,7 @@ func createVMSS(ctx context.Context, t *testing.T, vmssName string, opts *scenar
 		cleanupVMSS(ctx, t, vmssName, opts, privateKeyBytes)
 	})
 
-	vmssResp, err := operation.PollUntilDone(ctx, &runtime.PollUntilDoneOptions{
-		Frequency: 10 * time.Second,
-	})
+	vmssResp, err := operation.PollUntilDone(ctx, config.DefaultPollUntilDoneOptions)
 	// fail test, but continue to extract debug information
 	require.NoError(t, err, "create vmss %q, check %s for vm logs", vmssName, testDir(t))
 	return &vmssResp.VirtualMachineScaleSet
@@ -72,7 +68,7 @@ func createVMSS(ctx context.Context, t *testing.T, vmssName string, opts *scenar
 func skipTestIfSKUNotAvailableErr(t *testing.T, err error) {
 	// sometimes the SKU is not available and we can't do anything. Skip the test in this case.
 	var respErr *azcore.ResponseError
-	if config.SkipTestsWithSKUCapacityIssue &&
+	if config.Config.SkipTestsWithSKUCapacityIssue &&
 		errors.As(err, &respErr) &&
 		respErr.StatusCode == 409 &&
 		respErr.ErrorCode == "SkuNotAvailable" {
@@ -82,26 +78,29 @@ func skipTestIfSKUNotAvailableErr(t *testing.T, err error) {
 
 func cleanupVMSS(ctx context.Context, t *testing.T, vmssName string, opts *scenarioRunOpts, privateKeyBytes []byte) {
 	// original context can be cancelled, but we still want to collect the logs
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Minute)
 	defer cancel()
 	defer deleteVMSS(t, ctx, vmssName, opts, privateKeyBytes)
-	if t.Failed() {
-		vmPrivateIP, err := getVMPrivateIPAddress(ctx, *opts.clusterConfig.Model.Properties.NodeResourceGroup, vmssName)
-		require.NoError(t, err)
 
-		require.NoError(t, err, "get vm private IP %v", vmssName)
-		err = pollExtractVMLogs(ctx, t, vmssName, vmPrivateIP, privateKeyBytes, opts)
-		require.NoError(t, err, "extract vm logs %v", vmssName)
-	}
+	vmPrivateIP, err := getVMPrivateIPAddress(ctx, *opts.clusterConfig.Model.Properties.NodeResourceGroup, vmssName)
+	require.NoError(t, err)
+
+	require.NoError(t, err, "get vm private IP %v", vmssName)
+	logFiles, err := extractLogsFromVM(ctx, t, vmssName, vmPrivateIP, string(privateKeyBytes), opts)
+	require.NoError(t, err, "extract logs from vm %v", vmssName)
+
+	err = dumpFileMapToDir(t, logFiles)
+	require.NoError(t, err, "dump file map to dir %v", vmssName)
 
 }
 
 func deleteVMSS(t *testing.T, ctx context.Context, vmssName string, opts *scenarioRunOpts, privateKeyBytes []byte) {
-	if config.KeepVMSS {
+	if config.Config.KeepVMSS {
 		t.Logf("vmss %q will be retained for debugging purposes, please make sure to manually delete it later", vmssName)
 		if err := writeToFile(t, "sshkey", string(privateKeyBytes)); err != nil {
 			t.Logf("failed to write retained vmss %s private ssh key to disk: %s", vmssName, err)
 		}
+		return
 	}
 	_, err := config.Azure.VMSS.BeginDelete(ctx, *opts.clusterConfig.Model.Properties.NodeResourceGroup, vmssName, &armcompute.VirtualMachineScaleSetsClientBeginDeleteOptions{
 		ForceDeletion: to.Ptr(true),
@@ -116,7 +115,7 @@ func deleteVMSS(t *testing.T, ctx context.Context, vmssName string, opts *scenar
 // Adds additional IP configs to the passed in vmss model based on the chosen cluster's setting of "maxPodsPerNode",
 // as we need be able to allow AKS to allocate an additional IP config for each pod running on the given node.
 // Additional info: https://learn.microsoft.com/en-us/azure/aks/configure-azure-cni
-func addPodIPConfigsForAzureCNI(ctx context.Context, vmss *armcompute.VirtualMachineScaleSet, vmssName string, opts *scenarioRunOpts) error {
+func addPodIPConfigsForAzureCNI(vmss *armcompute.VirtualMachineScaleSet, vmssName string, opts *scenarioRunOpts) error {
 	maxPodsPerNode, err := opts.clusterConfig.MaxPodsPerNode()
 	if err != nil {
 		return fmt.Errorf("failed to read agentpool MaxPods value from chosen cluster model: %w", err)
@@ -146,7 +145,7 @@ func addPodIPConfigsForAzureCNI(ctx context.Context, vmss *armcompute.VirtualMac
 func getVMPrivateIPAddress(ctx context.Context, mcResourceGroupName, vmssName string) (string, error) {
 	pl := config.Azure.Core.Pipeline()
 	url := fmt.Sprintf(listVMSSNetworkInterfaceURLTemplate,
-		config.SubscriptionID,
+		config.Config.SubscriptionID,
 		mcResourceGroupName,
 		vmssName,
 		0,
@@ -223,9 +222,10 @@ func getVmssName(t *testing.T) string {
 	name = strings.ReplaceAll(name, "_", "")
 	name = strings.ReplaceAll(name, "/", "")
 	name = strings.ReplaceAll(name, "Test", "")
-	// truncate to 58 characters
-	if len(name) > 58 { // a limit for VMSS name
-		name = name[:58]
+	// truncate to 57 characters, as AKS has a limit of 64 characters for VM names
+	// an additional prefix is generated for VM name
+	if len(name) > 57 { // a limit for VMSS name
+		name = name[:57]
 	}
 	// AKS converts VM names to lowercase at some stage, avoid potential matching issues
 	name = strings.ToLower(name)
@@ -234,7 +234,7 @@ func getVmssName(t *testing.T) string {
 
 func getBaseVMSSModel(name, sshPublicKey, customData, cseCmd string, opts *scenarioRunOpts) armcompute.VirtualMachineScaleSet {
 	return armcompute.VirtualMachineScaleSet{
-		Location: to.Ptr(config.Location),
+		Location: to.Ptr(config.Config.Location),
 		SKU: &armcompute.SKU{
 			Name:     to.Ptr("Standard_D2ds_v5"),
 			Capacity: to.Ptr[int64](1),
@@ -301,7 +301,7 @@ func getBaseVMSSModel(name, sshPublicKey, customData, cseCmd string, opts *scena
 													ID: to.Ptr(
 														fmt.Sprintf(
 															loadBalancerBackendAddressPoolIDTemplate,
-															config.SubscriptionID,
+															config.Config.SubscriptionID,
 															*opts.clusterConfig.Model.Properties.NodeResourceGroup,
 														),
 													),

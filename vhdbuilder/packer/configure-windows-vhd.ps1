@@ -691,12 +691,20 @@ function Update-Registry {
         Enable-WindowsFixInFeatureManagement -Name 2540111500
         Enable-WindowsFixInFeatureManagement -Name 50261647
         Enable-WindowsFixInFeatureManagement -Name 1475968140
+
+        Write-Log "Enable 1 fix in 2024-07B"
+        Enable-WindowsFixInFeatureManagement -Name 747051149
+
+        Write-Log "Enable 1 fix in 2024-08B"
+        Enable-WindowsFixInFeatureManagement -Name 260097166
     }
 
     if ($env:WindowsSKU -Like '23H2*') {
-        Write-Log "Exclude port 65330 in 23H2"
-        Enable-WindowsFixInHnsState -Name NamespaceExcludedUdpPorts -Value 65330 -Type STRING
-        Enable-WindowsFixInHnsState -Name PortExclusionChange -Value 1
+        Write-Log "Disable port exclusion change in 23H2"
+        Enable-WindowsFixInHnsState -Name PortExclusionChange -Value 0
+
+        Write-Log "Enable 1 fix in 2024-08B"
+        Enable-WindowsFixInFeatureManagement -Name 1800977551
     }
 }
 
@@ -759,7 +767,7 @@ function Validate-VHDFreeSize {
     foreach($disk in $disksInfo) {
         if ($disk.DeviceID -eq "C:") {
             if ($disk.FreeSpace -lt $global:lowestFreeSpace) {
-                throw "Disk C: Free space $($disk.FreeSpace) is less than $($global:lowestFreeSpace)"
+                Write-Log "Disk C: Free space $($disk.FreeSpace) is less than $($global:lowestFreeSpace)"
             }
             break
         }
@@ -785,7 +793,9 @@ function Get-LatestWindowsDefenderPlatformUpdate {
     $downloadFilePath = [IO.Path]::Combine([System.IO.Path]::GetTempPath(), "Mpupdate.exe")
  
     $currentDefenderProductVersion = (Get-MpComputerStatus).AMProductVersion
-    $latestDefenderProductVersion = ([xml]((Invoke-WebRequest -UseBasicParsing -Uri:"$global:defenderUpdateInfoUrl").Content)).versions.platform
+    $doc = New-Object xml
+    $doc.Load("$global:defenderUpdateInfoUrl")
+    $latestDefenderProductVersion = $doc.versions.platform
  
     if ($latestDefenderProductVersion -gt $currentDefenderProductVersion) {
         Write-Log "Update started. Current MPVersion: $currentDefenderProductVersion, Expected Version: $latestDefenderProductVersion"

@@ -18,13 +18,13 @@ import (
 func getNodeBootstrapping(ctx context.Context, nbc *datamodel.NodeBootstrappingConfiguration) (*datamodel.NodeBootstrapping, error) {
 	switch e2eMode {
 	case "coverage":
-		return getNodeBootstrappingForCoverage(ctx, nbc)
+		return getNodeBootstrappingForCoverage(nbc)
 	default:
 		return getNodeBootstrappingForValidation(ctx, nbc)
 	}
 }
 
-func getNodeBootstrappingForCoverage(ctx context.Context, nbc *datamodel.NodeBootstrappingConfiguration) (*datamodel.NodeBootstrapping, error) {
+func getNodeBootstrappingForCoverage(nbc *datamodel.NodeBootstrappingConfiguration) (*datamodel.NodeBootstrapping, error) {
 	payload, err := json.Marshal(nbc)
 	if err != nil {
 		log.Fatalf("failed to marshal nbc, error: %s", err)
@@ -60,7 +60,7 @@ func getNodeBootstrappingForValidation(ctx context.Context, nbc *datamodel.NodeB
 }
 
 func getBaseNodeBootstrappingConfiguration(clusterParams map[string]string) (*datamodel.NodeBootstrappingConfiguration, error) {
-	nbc := baseTemplate(config.Location)
+	nbc := baseTemplate(config.Config.Location)
 	nbc.ContainerService.Properties.CertificateProfile.CaCertificate = clusterParams["/etc/kubernetes/certs/ca.crt"]
 
 	bootstrapKubeconfig := clusterParams["/var/lib/kubelet/bootstrap-kubeconfig"]

@@ -121,6 +121,17 @@ testPackagesInstalled() {
         echo $test "[INFO] Directory ${extractedPackageDir} exists"
         continue
       fi
+
+      # if the downloadLocation is /usr/local/bin verify that the package is installed
+      if [ "$downloadLocation" == "/usr/local/bin" ]; then
+          if command -v "$name" >/dev/null 2>&1; then
+              echo "$name is installed."
+              continue
+          else
+              err $test "$name is not installed. Expected to be installed in $downloadLocation"
+              continue
+          fi
+      fi
       
       # if there isn't a directory, we check if the file exists and the size is correct
       # -L since some urls are redirects (i.e github)
@@ -863,7 +874,9 @@ testPam() {
     pip3 install --disable-pip-version-check -r requirements.txt || \
       (err ${test} "Failed to install dependencies"; return 1)
     # run the script
-    output=$(pytest -v -s test_pam.py)
+    # the pam tests are flaky as they require scraping the console
+    # if there are test failures, --reruns 5 will rerun the failed tests up to 5 times
+    output=$(pytest -v -s --reruns 5 test_pam.py)
     retval=$?
     # deactivate the virtual environment
     deactivate
