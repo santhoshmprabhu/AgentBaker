@@ -121,7 +121,7 @@ EOF
 }
 
 configureHTTPProxyCA() {
-    if [[ $OS == $MARINER_OS_NAME ]]; then
+    if isMarinerOrAzureLinux "$OS"; then
         cert_dest="/usr/share/pki/ca-trust-source/anchors"
         update_cmd="update-ca-trust"
     else
@@ -523,7 +523,7 @@ EOF
     if [[ $KUBELET_FLAGS == *"image-credential-provider-config"* && $KUBELET_FLAGS == *"image-credential-provider-bin-dir"* ]]; then
         echo "Configure credential provider for both image-credential-provider-config and image-credential-provider-bin-dir flags are specified in KUBELET_FLAGS"
         logs_to_events "AKS.CSE.ensureKubelet.configCredentialProvider" configCredentialProvider
-        logs_to_events "AKS.CSE.ensureKubelet.installCredentalProvider" installCredentalProvider
+        logs_to_events "AKS.CSE.ensureKubelet.installCredentialProvider" installCredentialProvider
     fi
 
     systemctlEnableAndStart kubelet || exit $ERR_KUBELET_START_FAIL
@@ -647,9 +647,9 @@ configGPUDrivers() {
             fi
             docker rmi $NVIDIA_DRIVER_IMAGE:$NVIDIA_DRIVER_IMAGE_TAG
         fi
-    elif [[ $OS == $MARINER_OS_NAME ]]; then
+    elif isMarinerOrAzureLinux "$OS"; then
         downloadGPUDrivers
-        installNvidiaContainerRuntime
+        installNvidiaContainerToolkit
         enableNvidiaPersistenceMode
     else 
         echo "os $OS not supported at this time. skipping configGPUDrivers"
@@ -660,7 +660,7 @@ configGPUDrivers() {
     retrycmd_if_failure 120 5 300 nvidia-smi || exit $ERR_GPU_DRIVERS_START_FAIL
     retrycmd_if_failure 120 5 25 ldconfig || exit $ERR_GPU_DRIVERS_START_FAIL
 
-    if [[ $OS == $MARINER_OS_NAME ]]; then
+    if isMarinerOrAzureLinux "$OS"; then
         createNvidiaSymlinkToAllDeviceNodes
     fi
     
