@@ -175,12 +175,6 @@ if [ "${NEEDS_DOCKER_LOGIN}" == "true" ]; then
     set -x
 fi
 
-if [ "${ENABLE_IMDS_RESTRICTION}" == "true" ]; then
-    logs_to_events "AKS.CSE.ensureIMDSRestrictionRule" ensureIMDSRestrictionRule "${INSERT_IMDS_RESTRICTION_RULE_TO_MANGLE_TABLE}"
-else
-    logs_to_events "AKS.CSE.disableIMDSRestriction" disableIMDSRestriction
-fi
-
 logs_to_events "AKS.CSE.installKubeletKubectlAndKubeProxy" installKubeletKubectlAndKubeProxy
 
 createKubeManifestDir
@@ -191,6 +185,8 @@ fi
 
 
 mkdir -p "/etc/systemd/system/kubelet.service.d"
+
+logs_to_events "AKS.CSE.disableKubeletServingCertificateRotationForTags" disableKubeletServingCertificateRotationForTags
 
 logs_to_events "AKS.CSE.configureK8s" configureK8s
 
@@ -286,6 +282,7 @@ fi
 
 VALIDATION_ERR=0
 
+
 API_SERVER_CONN_RETRIES=50
 if [[ $API_SERVER_NAME == *.privatelink.* ]]; then
     API_SERVER_CONN_RETRIES=100
@@ -309,10 +306,20 @@ if ! [[ ${API_SERVER_NAME} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VALIDATION_ERR=$ERR_K8S_API_SERVER_DNS_LOOKUP_FAIL
         fi
     else
-        logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+        if [ "${UBUNTU_RELEASE}" == "18.04" ]; then
+            #TODO (djsly): remove this once 18.04 isn't supported anymore
+            logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+        else
+            logs_to_events "AKS.CSE.apiserverCurl" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 curl -v --cacert /etc/kubernetes/certs/ca.crt https://${API_SERVER_NAME}:443" || time curl -v --cacert /etc/kubernetes/certs/ca.crt "https://${API_SERVER_NAME}:443" || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+        fi
     fi
 else
-    logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+    if [ "${UBUNTU_RELEASE}" == "18.04" ]; then
+        #TODO (djsly): remove this once 18.04 isn't supported anymore
+        logs_to_events "AKS.CSE.apiserverNC" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 nc -vz ${API_SERVER_NAME} 443" || time nc -vz ${API_SERVER_NAME} 443 || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+    else
+        logs_to_events "AKS.CSE.apiserverCurl" "retrycmd_if_failure ${API_SERVER_CONN_RETRIES} 1 10 curl -v --cacert /etc/kubernetes/certs/ca.crt https://${API_SERVER_NAME}:443" || time curl -v --cacert /etc/kubernetes/certs/ca.crt "https://${API_SERVER_NAME}:443" || VALIDATION_ERR=$ERR_K8S_API_SERVER_CONN_FAIL
+    fi
 fi
 
 if [[ ${ID} != "mariner" ]] && [[ ${ID} != "azurelinux" ]]; then

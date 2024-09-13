@@ -114,10 +114,13 @@ ERR_CNI_VERSION_INVALID=206 # reference CNI (not azure cni) needs a valid versio
 
 ERR_ORAS_PULL_K8S_FAIL=207 # Error pulling kube-node artifact via oras from registry
 ERR_ORAS_PULL_FAIL_RESERVE_1=208 # Error pulling artifact with oras from registry
-ERR_ORAS_PULL_FAIL_RESERVE_2=209 # Error pulling artifact with oras from registry
+ERR_ORAS_PULL_CONTAINERD_WASM=209 # Error pulling containerd wasm artifact with oras from registry
 ERR_ORAS_PULL_FAIL_RESERVE_3=210 # Error pulling artifact with oras from registry
 ERR_ORAS_PULL_FAIL_RESERVE_4=211 # Error pulling artifact with oras from registry
 ERR_ORAS_PULL_FAIL_RESERVE_5=212 # Error pulling artifact with oras from registry
+
+# Error checking nodepools tags for whether we need to disable kubelet serving certificate rotation
+ERR_LOOKUP_DISABLE_KUBELET_SERVING_CERTIFICATE_ROTATION_TAG=213
 
 # For both Ubuntu and Mariner, /etc/*-release should exist.
 # For unit tests, the OS and OS_VERSION will be set in the unit test script.
@@ -386,6 +389,15 @@ isARM64() {
     fi
 }
 
+isRegistryUrl() {
+    local binary_url=$1
+    registry_regex='^.+\/.+\/.+:.+$'
+    if [[ ${binary_url} =~ $registry_regex ]]; then # check if the binary_url is in the format of mcr.microsoft.com/componant/binary:1.0"
+        return 0 # true
+    fi
+    return 1 # false
+}
+
 logs_to_events() {
     # local vars here allow for nested function tracking
     # installContainerRuntime for example
@@ -427,6 +439,17 @@ should_skip_nvidia_drivers() {
     fi
     should_skip=$(echo "$body" | jq -e '.compute.tagsList | map(select(.name | test("SkipGpuDriverInstall"; "i")))[0].value // "false" | test("true"; "i")')
     echo "$should_skip"
+}
+
+should_disable_kubelet_serving_certificate_rotation() {
+    set -x
+    body=$(curl -fsSL -H "Metadata: true" --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01")
+    ret=$?
+    if [ "$ret" != "0" ]; then
+      return $ret
+    fi
+    should_disable=$(echo "$body" | jq -r '.compute.tagsList[] | select(.name == "aks-disable-kubelet-serving-certificate-rotation") | .value')
+    echo "$should_disable"
 }
 
 isMarinerOrAzureLinux() {

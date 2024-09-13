@@ -108,10 +108,12 @@ ERR_CNI_VERSION_INVALID=206
 
 ERR_ORAS_PULL_K8S_FAIL=207 
 ERR_ORAS_PULL_FAIL_RESERVE_1=208 
-ERR_ORAS_PULL_FAIL_RESERVE_2=209 
+ERR_ORAS_PULL_CONTAINERD_WASM=209 
 ERR_ORAS_PULL_FAIL_RESERVE_3=210 
 ERR_ORAS_PULL_FAIL_RESERVE_4=211 
 ERR_ORAS_PULL_FAIL_RESERVE_5=212 
+
+ERR_LOOKUP_DISABLE_KUBELET_SERVING_CERTIFICATE_ROTATION_TAG=213
 
 if find /etc -type f,l -name "*-release" -print -quit 2>/dev/null | grep -q '.'; then
     OS=$(sort -r /etc/*-release | gawk 'match($0, /^(ID_LIKE=(coreos)|ID=(.*))$/, a) { print toupper(a[2] a[3]); exit }')
@@ -367,6 +369,15 @@ isARM64() {
     fi
 }
 
+isRegistryUrl() {
+    local binary_url=$1
+    registry_regex='^.+\/.+\/.+:.+$'
+    if [[ ${binary_url} =~ $registry_regex ]]; then 
+        return 0 
+    fi
+    return 1 
+}
+
 logs_to_events() {
     local task=$1; shift
     local eventsFileName=$(date +%s%3N)
@@ -403,6 +414,17 @@ should_skip_nvidia_drivers() {
     fi
     should_skip=$(echo "$body" | jq -e '.compute.tagsList | map(select(.name | test("SkipGpuDriverInstall"; "i")))[0].value // "false" | test("true"; "i")')
     echo "$should_skip"
+}
+
+should_disable_kubelet_serving_certificate_rotation() {
+    set -x
+    body=$(curl -fsSL -H "Metadata: true" --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01")
+    ret=$?
+    if [ "$ret" != "0" ]; then
+      return $ret
+    fi
+    should_disable=$(echo "$body" | jq -r '.compute.tagsList[] | select(.name == "aks-disable-kubelet-serving-certificate-rotation") | .value')
+    echo "$should_disable"
 }
 
 isMarinerOrAzureLinux() {
