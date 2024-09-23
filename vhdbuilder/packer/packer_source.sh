@@ -143,6 +143,10 @@ copyPackerFiles() {
   cpAndMode $CSE_REDACT_SRC $CSE_REDACT_DEST 600
 
   if grep -q "kata" <<< "$FEATURE_FLAGS"; then
+
+    echo "<mitchzhu> OS_VERSION is:"
+    cat "$OS_VERSION"
+
     # KataCC SPEC file assumes kata config points to the files exactly under this path
     KATA_CONFIG_DIR=/var/cache/kata-containers/osbuilder-images/kernel-uvm/
     KATACC_CONFIG_DIR=/opt/confidential-containers/share/kata-containers
