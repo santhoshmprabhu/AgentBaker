@@ -2,6 +2,5 @@
 
 # Code owners for cse_cmd.sh.gtpl and cse_cmd.sh. 
 # In case someone modifies one file but forgets the other one.
-# Testing if it will work as expected.
 cse_cmd.sh.gtpl @Devinwong @lilypan26 @r2k1 @timmy-wright
 cse_cmd.sh @Devinwong @lilypan26 @r2k1 @timmy-wright

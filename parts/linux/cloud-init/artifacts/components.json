@@ -776,36 +776,36 @@
             "versionsV2": [
               {
                 "k8sVersion": "1.27",
-                "renovateTag": "<DO_NOT_UPDATE>",
+                "renovateTag": "registry=https://mcr.microsoft.com, name=oss/binaries/kubernetes/kubernetes-node",
                 "latestVersion": "1.27.100-akslts",
                 "previousLatestVersion": "1.27.16"
               },
               {
                 "k8sVersion": "1.28",
-                "renovateTag": "<DO_NOT_UPDATE>",
+                "renovateTag": "registry=https://mcr.microsoft.com, name=oss/binaries/kubernetes/kubernetes-node",
                 "latestVersion": "1.28.15",
                 "previousLatestVersion": "1.28.14"
               },
               {
                 "k8sVersion": "1.29",
-                "renovateTag": "<DO_NOT_UPDATE>",
+                "renovateTag": "registry=https://mcr.microsoft.com, name=oss/binaries/kubernetes/kubernetes-node",
                 "latestVersion": "1.29.10",
                 "previousLatestVersion": "1.29.9"
               },
               {
                 "k8sVersion": "1.30",
-                "renovateTag": "<DO_NOT_UPDATE>",
+                "renovateTag": "registry=https://mcr.microsoft.com, name=oss/binaries/kubernetes/kubernetes-node",
                 "latestVersion": "1.30.6",
                 "previousLatestVersion": "1.30.5"
               },
               {
                 "k8sVersion": "1.31",
-                "renovateTag": "<DO_NOT_UPDATE>",
+                "renovateTag": "registry=https://mcr.microsoft.com, name=oss/binaries/kubernetes/kubernetes-node",
                 "latestVersion": "1.31.2",
                 "previousLatestVersion": "1.31.1"
               }
             ],
-            "downloadURL": "https://acs-mirror.azureedge.net/kubernetes/v${version}/binaries/kubernetes-node-linux-${CPU_ARCH}.tar.gz"
+            "downloadURL": "mcr.microsoft.com/oss/binaries/kubernetes/kubernetes-node:v${version}-linux-${CPU_ARCH}"
           }
         }
       }
