@@ -233,6 +233,10 @@ if [ "${IPV6_DUAL_STACK_ENABLED}" == "true" ]; then
     logs_to_events "AKS.CSE.ensureDHCPv6" ensureDHCPv6
 fi
 
+if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
+    logs_to_events "AKS.CSE.ensureAKSLocalDNS" ensureAKSLocalDNS
+fi
+
 # For systemd in Azure Linux, UseDomains= is by default disabled for security purposes. Enable this
 # configuration within Azure Linux AKS that operates on trusted networks to support hostname resolution
 if isMarinerOrAzureLinux "$OS"; then

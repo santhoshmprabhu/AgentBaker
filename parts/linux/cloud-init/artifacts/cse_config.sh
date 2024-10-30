@@ -483,6 +483,10 @@ ensureKubelet() {
     if [ -n "${AZURE_ENVIRONMENT_FILEPATH}" ]; then
         echo "AZURE_ENVIRONMENT_FILEPATH=${AZURE_ENVIRONMENT_FILEPATH}" >> "${KUBELET_DEFAULT_FILE}"
     fi
+
+    if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
+        sed -ie "s/--cluster-dns=[^ \n]\+/--cluster-dns=${AKS_LOCAL_DNS_CLUSTER_LISTENER_IP}/" "${KUBELET_DEFAULT_FILE}"
+    fi
     chmod 0600 "${KUBELET_DEFAULT_FILE}"
     
     KUBE_CA_FILE="/etc/kubernetes/certs/ca.crt"
@@ -873,6 +877,26 @@ setKubeletNodeIPFlag() {
             KUBELET_FLAGS="$KUBELET_FLAGS --node-ip=$nodeIPArg"
         fi
     fi
+}
+
+ensureAKSLocalDNS() {
+    LOCAL_DNS_CORE_FILE=/opt/azure/aks-local-dns/Corefile
+    mkdir -p "$(dirname "${LOCAL_DNS_CORE_FILE}")"
+    touch "${LOCAL_DNS_CORE_FILE}"
+    chmod 0644 "${LOCAL_DNS_CORE_FILE}"
+    echo "${LOCAL_DNS_GENERATED_CORE_FILE}" | base64 -d > "${LOCAL_DNS_CORE_FILE}"
+    echo "${LOCAL_DNS_CORE_FILE}"
+
+    mkdir -p /etc/systemd/system/aks-local-dns.service.d/
+    touch /etc/systemd/system/aks-local-dns.service.d/aks-local-dns.conf
+    tee /etc/systemd/system/aks-local-dns.service.d/aks-local-dns.conf > /dev/null <<EOF
+[Service]
+Environment="COREDNS_IMAGE_URL=${AKS_LOCAL_DNS_IMAGE_URL}"
+Environment="NODE_LISTENER_IP=${AKS_LOCAL_DNS_NODE_LISTENER_IP}"
+Environment="CLUSTER_LISTENER_IP=${AKS_LOCAL_DNS_CLUSTER_LISTENER_IP}"
+Environment="UPSTREAM_DNS_SERVER_IP=${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+EOF
+    systemctlEnableAndStart aks-local-dns || exit $ERR_LOCAL_DNS_START_FAIL
 }
 
 #EOF

@@ -1,0 +1,13 @@
+#######################################################################
+# AKS Local DNS configuration file
+#######################################################################
+# Image reference used to get coredns (via extraction from the image)
+#COREDNS_IMAGE_DEFAULT=""
+
+# Amount of time (in seconds) to wait after removing forward rules for
+# connections to terminate gracefully
+#COREDNS_SHUTDOWN_DELAY_DEFAULT="3"
+
+# The PID file used to store the PID of the coredns instance (NOT
+# the PID of the main script).
+#PID_FILE_DEFAULT="/run/aks-local-dns.pid"

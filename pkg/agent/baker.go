@@ -984,6 +984,28 @@ func getContainerServiceFuncMap(config *datamodel.NodeBootstrappingConfiguration
 		"InsertIMDSRestrictionRuleToMangleTable": func() bool {
 			return config.InsertIMDSRestrictionRuleToMangleTable
 		},
+		"IsAKSLocalDNSEnabled": func() bool {
+			return profile.IsAKSLocalDNSEnabled()
+		},
+		"GetLocalDNSCoreFileFromTemplate": func() string {
+			output, err := LocalDNSCoreFileFromTemplate(config, profile, localDNSCoreFileTemplateString)
+			if err != nil {
+				panic(err)
+			}
+			return output
+		},
+		"GetLocalDNSImageUrl": func() string {
+			return profile.GetLocalDNSImageUrl()
+		},
+		"GetNodeListenerIP": func() string {
+			return profile.GetNodeListenerIP()
+		},
+		"GetClusterListenerIP": func() string {
+			return profile.GetClusterListenerIP()
+		},
+		"GetUpstreamDNSServerIP": func() string {
+			return profile.GetUpstreamDNSServerIP()
+		},
 	}
 }
 
@@ -1488,3 +1510,88 @@ func containerdConfigFromTemplate(
 	}
 	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
 }
+
+// Parse and generate local DNS Corefile from template and LocalDnsProfile.
+func LocalDNSCoreFileFromTemplate(
+	config *datamodel.NodeBootstrappingConfiguration,
+	profile *datamodel.AgentPoolProfile,
+	tmpl string,
+) (string, error) {
+	parameters := getParameters(config)
+	variables := getCustomDataVariables(config)
+	bakerFuncMap := getBakerFuncMap(config, parameters, variables)
+	localDNSCorefileTemplate := template.Must(template.New("localdnscorefile").Funcs(bakerFuncMap).Parse(tmpl))
+
+	var b bytes.Buffer
+	if err := localDNSCorefileTemplate.Execute(&b, profile.LocalDnsProfileWithSortedDomains); err != nil {
+		return "", fmt.Errorf("failed to execute local dns corefile template: %w", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
+}
+
+// Template to create corefile that will be used by local DNS systemd service.
+const localDNSCoreFileTemplateString = `
+# whoami (used for health check of DNS)
+health-check.aks-local-dns.local:53 {
+    bind {{$.LocalDnsProfile.NodeListenerIP}} {{$.LocalDnsProfile.ClusterListenerIP}}
+    whoami
+}
+# VNET DNS traffic (Traffic from pods with dnsPolicy:default or kubelet)
+{{- range $index, $domain := .SortedVnetDnsOverrideDomains}}
+{{- $override := index $.LocalDnsProfile.VnetDnsOverrides $domain}}
+{{$domain}}:53 {
+    {{$override.LogLevel}}
+    bind {{$.LocalDnsProfile.NodeListenerIP}}
+    forward cluster.local {{$.CoreDnsServiceIP}} {
+        {{- if $override.ForceTCP}}
+        force_tcp
+        {{- end}}
+        policy {{$override.ForwardPolicy}}
+        max_concurrent {{$override.MaxConcurrent}}
+    }
+    forward . {{$.UpstreamDnsServerIP}} {
+        {{- if $override.ForceTCP}}
+        force_tcp
+        {{- end}}
+        policy {{$override.ForwardPolicy}}
+        max_concurrent {{$override.MaxConcurrent}}
+    }
+    ready {{$.LocalDnsProfile.NodeListenerIP}}:8181
+    cache {{$override.CacheDurationInSeconds}}s {
+        success 9984
+        denial 9984
+        {{- if ne $override.ServeStale "Disabled"}}
+        serve_stale {{$override.CacheDurationInSeconds}}s {{$override.ServeStale}}
+        {{- end}}
+        servfail 0
+    }
+    loop
+    nsid aks-local-dns
+    prometheus {{$.LocalDnsProfile.NodeListenerIP}}:9253
+}{{end}}
+# Kube DNS traffic (Traffic from pods with dnsPolicy:ClusterFirst)
+{{- range $index, $domain := .SortedKubeDnsOverrideDomains}}
+{{- $override := index $.LocalDnsProfile.KubeDnsOverrides $domain}}
+{{$domain}}:53 {
+    {{$override.LogLevel}}
+    bind {{$.LocalDnsProfile.ClusterListenerIP}}
+    forward . {{$.CoreDnsServiceIP}} {
+        {{- if $override.ForceTCP}}
+        force_tcp
+        {{- end}}
+        policy {{$override.ForwardPolicy}}
+        max_concurrent {{$override.MaxConcurrent}}
+    }
+    cache {{$override.CacheDurationInSeconds}}s {
+        success 9984
+        denial 9984
+        {{- if ne $override.ServeStale "Disabled"}}
+        serve_stale {{$override.CacheDurationInSeconds}}s {{$override.ServeStale}}
+        {{- end}}
+        servfail 0
+    }
+    loop
+    nsid aks-local-dns-pod
+}{{end}}
+`
