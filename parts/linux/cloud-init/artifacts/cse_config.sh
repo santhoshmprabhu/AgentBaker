@@ -460,6 +460,16 @@ configureKubeletServingCertificateRotation() {
     addKubeletNodeLabel $KUBELET_SERVING_CERTIFICATE_ROTATION_LABEL
 }
 
+ensureAKSLocalDNS() {
+    mkdir -p /etc/systemd/system/aks-local-dns.service.d/
+    touch /etc/systemd/system/aks-local-dns.service.d/aks-local-dns.conf
+    tee /etc/systemd/system/aks-local-dns.service.d/aks-local-dns.conf > /dev/null <<EOF
+[Service]
+Environment="CLUSTER_DNS_SERVICE_IP=${CLUSTER_DNS_SERVICE_IP}"
+EOF
+    systemctlEnableAndStart aks-local-dns || exit $ERR_LOCAL_DNS_START_FAIL
+}
+
 ensureKubelet() {
     KUBELET_DEFAULT_FILE=/etc/default/kubelet
     mkdir -p /etc/default
@@ -482,6 +492,11 @@ ensureKubelet() {
     echo "KUBELET_NODE_LABELS=${KUBELET_NODE_LABELS}" >> "${KUBELET_DEFAULT_FILE}"
     if [ -n "${AZURE_ENVIRONMENT_FILEPATH}" ]; then
         echo "AZURE_ENVIRONMENT_FILEPATH=${AZURE_ENVIRONMENT_FILEPATH}" >> "${KUBELET_DEFAULT_FILE}"
+    fi
+    
+    if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
+        LOCAL_POD_DNS_IP="169.254.10.11"
+        sed -ie "s/--cluster-dns=[^ \n]\+/--cluster-dns=${LOCAL_POD_DNS_IP}/" "${KUBELET_DEFAULT_FILE}"
     fi
     chmod 0600 "${KUBELET_DEFAULT_FILE}"
     

@@ -164,3 +164,5 @@ BOOTSTRAP_PROFILE_CONTAINER_REGISTRY_SERVER="{{GetBootstrapProfileContainerRegis
 ENABLE_IMDS_RESTRICTION="{{EnableIMDSRestriction}}"
 INSERT_IMDS_RESTRICTION_RULE_TO_MANGLE_TABLE="{{InsertIMDSRestrictionRuleToMangleTable}}"
 /usr/bin/nohup /bin/bash -c "/bin/bash /opt/azure/containers/provision_start.sh"
+AKS_LOCAL_DNS_ENABLED="{{IsAKSLocalDNSEnabled}}"
+CLUSTER_DNS_SERVICE_IP="{{GetClusterDNSServiceIp}}"

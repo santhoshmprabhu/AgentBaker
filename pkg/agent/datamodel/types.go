@@ -777,6 +777,35 @@ type ComponentConfiguration struct {
 	DownloadURL *string
 }
 
+type DNSOverride struct {
+	CacheDurationSeconds int    `json:"cacheDurationSeconds"`
+	ForceTCP             bool   `json:"forceTcp"`
+	MaxConcurrent        int    `json:"maxConcurrent"`
+	ForwardPolicy        string `json:"forwardPolicy"`
+	ServeStale           string `json:"serveStale"`
+}
+
+type LocalDNSConfig struct {
+	ServiceState     string                 `json:"serviceState"`
+	CPULimit         int                    `json:"cpuLimit"`
+	MemoryLimitMB    int                    `json:"memoryLimitMB"`
+	NodeDNSOverrides map[string]DNSOverride `json:"nodeDnsOverrides"`
+	PodDNSOverrides  map[string]DNSOverride `json:"podDnsOverrides"`
+}
+
+// IsAKSLocalDNSEnabled returns true if the customer specified localDnsProfile and serviceState property is enable.
+func (a *AgentPoolProfile) IsAKSLocalDNSEnabled() bool {
+	return a.LocalDNSConfig != nil &&
+		strings.EqualFold(a.LocalDNSConfig.ServiceState, "enable")
+}
+
+func (a *AgentPoolProfile) GetClusterDNSServiceIp(k map[string]string) string {
+	if k == nil || k["--cluster-dns"] == "" {
+		return ""
+	}
+	return k["--cluster-dns"]
+}
+
 // AgentPoolProfile represents an agent pool definition.
 type AgentPoolProfile struct {
 	Name                  string               `json:"name"`
@@ -798,6 +827,7 @@ type AgentPoolProfile struct {
 	CustomKubeletConfig   *CustomKubeletConfig `json:"customKubeletConfig,omitempty"`
 	CustomLinuxOSConfig   *CustomLinuxOSConfig `json:"customLinuxOSConfig,omitempty"`
 	MessageOfTheDay       string               `json:"messageOfTheDay,omitempty"`
+	LocalDNSConfig        *LocalDNSConfig      `json:"localDNSConfig,omitempty"`
 	/* This is a new property and all old agent pools do no have this field. We need to keep the default
 	behavior to reboot Windows node when it is nil. */
 	NotRebootWindowsNode    *bool                    `json:"notRebootWindowsNode,omitempty"`

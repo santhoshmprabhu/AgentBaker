@@ -984,6 +984,12 @@ func getContainerServiceFuncMap(config *datamodel.NodeBootstrappingConfiguration
 		"InsertIMDSRestrictionRuleToMangleTable": func() bool {
 			return config.InsertIMDSRestrictionRuleToMangleTable
 		},
+		"IsAKSLocalDNSEnabled": func() bool {
+			return profile.IsAKSLocalDNSEnabled()
+		},
+		"GetClusterDNSServiceIp": func() string {
+			return profile.GetClusterDNSServiceIp(config.KubeletConfig)
+		},
 	}
 }
 
