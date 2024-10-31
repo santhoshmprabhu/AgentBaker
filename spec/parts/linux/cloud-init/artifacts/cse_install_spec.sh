@@ -27,6 +27,15 @@ Describe 'cse_install.sh'
             The output line 3 should equal "mock logs to events calling with AKS.CSE.installContainerRuntime.installStandaloneContainerd"
             The output line 4 should equal "in installContainerRuntime - CONTAINERD_VERSION = 1.2.3"
         End
+        It 'returns expected output for successful installation of fake containerd in UBUNTU 00.04'
+            UBUNTU_RELEASE="00.04"
+            containerdPackage=$(readPackage "containerd")
+            When call installContainerRuntime 
+            The variable containerdMajorMinorPatchVersion should equal "dummyVersionCurrent"
+            The variable containerdHotFixVersion should equal ""
+            The output line 3 should equal "mock logs to events calling with AKS.CSE.installContainerRuntime.installStandaloneContainerd"
+            The output line 4 should equal "in installContainerRuntime - CONTAINERD_VERSION = dummyVersionCurrent"
+        End
         It 'returns expected output for successful installation of containerd in Mariner'
             UBUNTU_RELEASE="" # mocking Mariner doesn't have command `lsb_release -cs`
             OS="MARINER"
