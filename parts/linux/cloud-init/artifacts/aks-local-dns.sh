@@ -9,10 +9,6 @@ set -euo pipefail
 
 . /etc/default/aks-local-dns
 
-: "${AKS_LOCAL_DNS_NODE_LISTENER_IP:? AKS_LOCAL_DNS_NODE_LISTENER_IP is required}"
-: "${AKS_LOCAL_DNS_CLUSTER_LISTENER_IP:? AKS_LOCAL_DNS_CLUSTER_LISTENER_IP is required}"
-: "${DEFAULT_UPSTREAM_DNS_SERVER_IP:? DEFAULT_UPSTREAM_DNS_SERVER_IP is required}"
-
 COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}"                # CoreDNS image reference to use to obtain the binary if not present
 NODE_LISTENER_IP="$2"                                         # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
 CLUSTER_LISTENER_IP="$3"                                      # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
