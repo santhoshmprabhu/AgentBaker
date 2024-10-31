@@ -265,7 +265,7 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 								ServiceState:    "Enabled",
 								CPULimit:        2,
 								MemoryLimitInMB: 128,
-								CoreDnsImageUrl: "mcr.microsoft.com/oss/kubernetes/coredns:v1.9.4",
+								CoreDnsImageUrl: "mcr.microsoft.com/oss/kubernetes/coredns:v1.9.4-hotfix.20240704",
 								VnetDnsOverrides: map[string]datamodel.DnsOverride{
 									".": {
 										LogLevel:               "errors",
@@ -488,7 +488,7 @@ func baseTemplate(location string) *datamodel.NodeBootstrappingConfiguration {
 					ServiceState:    "Enabled",
 					CPULimit:        2,
 					MemoryLimitInMB: 128,
-					CoreDnsImageUrl: "mcr.microsoft.com/oss/kubernetes/coredns:v1.9.4",
+					CoreDnsImageUrl: "mcr.microsoft.com/oss/kubernetes/coredns:v1.9.4-hotfix.20240704",
 					VnetDnsOverrides: map[string]datamodel.DnsOverride{
 						".": {
 							LogLevel:               "errors",

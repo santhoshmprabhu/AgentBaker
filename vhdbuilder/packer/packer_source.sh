@@ -101,6 +101,8 @@ copyPackerFiles() {
   AKS_LOCAL_DNS_SERVICE_DEST=/etc/systemd/system/aks-local-dns.service
   AKS_LOCAL_DNS_SLICE_SRC=/home/packer/aks-local-dns.slice
   AKS_LOCAL_DNS_SLICE_DEST=/etc/systemd/system/aks-local-dns.slice
+  AKS_NETWORKD_KEEPCONFIG_SRC=/home/packer/05-aks-keepconfig.conf
+  AKS_NETWORKD_KEEPCONFIG_DEST=/etc/systemd/network/10-netplan-eth0.network.d/05-aks-keepconfig.conf
   AKS_LOGROTATE_SCRIPT_SRC=/home/packer/logrotate.sh
   AKS_LOGROTATE_SCRIPT_DEST=/usr/local/bin/logrotate.sh
   AKS_LOGROTATE_SERVICE_SRC=/home/packer/logrotate.service

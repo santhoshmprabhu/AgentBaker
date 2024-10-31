@@ -1,12 +1,11 @@
 #! /bin/bash
 set -euo pipefail
 
-#######################################################################
+
 # AKS Local DNS Service
-#######################################################################
+# -------------------------------------------------------------------------------------------
 # This service runs coredns to act as a caching proxy with serve-stale functionality for both
-# pod DNS and local node DNS queries. It also upgrades to TCP for better reliability of
-# upstream connections.
+# pod DNS and local node DNS queries. It also upgrades to TCP for better reliability of upstream connections.
 
 . /etc/default/aks-local-dns
 
@@ -15,16 +14,16 @@ set -euo pipefail
 : "${CLUSTER_LISTENER_IP:? CLUSTER_LISTENER_IP is required}"
 : "${DEFAULT_UPSTREAM_DNS_SERVER_IP:? DEFAULT_UPSTREAM_DNS_SERVER_IP is required}"
 
-COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}" # CoreDNS image reference to use to obtain the binary if not present
-NODE_LISTENER_IP="$2" # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
-CLUSTER_LISTENER_IP="$3" # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
-DEFAULT_UPSTREAM_DNS_SERVER_IP="$4" # This is default upstream DNS server IP 169.63.129.16.
+COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}"                # CoreDNS image reference to use to obtain the binary if not present
+NODE_LISTENER_IP="$2"                                         # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
+CLUSTER_LISTENER_IP="$3"                                      # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
+DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"                           # This is default upstream DNS server IP 169.63.129.16.
 COREDNS_SHUTDOWN_DELAY="${COREDNS_SHUTDOWN_DELAY_DEFAULT:-5}" # Delay coredns shutdown to allow connections to finish
-PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}" # PID file
+PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}"        # PID file
 
-#######################################################################
-# information variables
-#######################################################################
+
+# Information variables
+# -------------------------------------------------------------------------------------------
 SCRIPT_PATH="$(dirname -- "$(readlink -f -- "$0";)";)"
 DEFAULT_ROUTE_INTERFACE="$(ip -j route get 168.63.129.16 | jq -r '.[0].dev')"
 NETWORK_FILE="$(networkctl --json=short status ${DEFAULT_ROUTE_INTERFACE} | jq -r '.NetworkFile')"
@@ -38,9 +37,9 @@ if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" 
     printf "Replaced '${DEFAULT_UPSTREAM_DNS_SERVER_IP}' with '${UPSTREAM_DNS_SERVERS_FROM_VNET}' in '${LOCAL_DNS_CORE_FILE_PATH}' \n"
 fi
 
-#######################################################################
-# iptables: build rules
-#######################################################################
+
+# Iptables: build rules
+# -------------------------------------------------------------------------------------------
 # These rules skip conntrack for DNS traffic to save conntrack table
 # space. OUTPUT rules affect node services and hostNetwork: true pods.
 # PREROUTING rules affect traffic from regular pods.
@@ -52,9 +51,9 @@ for PROTO in tcp udp; do
     IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
 done; done; done
 
-#######################################################################
+
 # cleanup function: will be run on script exit/crash to revert config
-#######################################################################
+# -------------------------------------------------------------------------------------------
 function cleanup {
     # Disable error handling so that we don't get into a recursive loop
     set +e
@@ -108,9 +107,9 @@ if [[ $* == *--cleanup* ]]; then
     exit 0
 fi
 
-#######################################################################
+
 # coredns: extract from image
-#######################################################################
+# -------------------------------------------------------------------------------------------
 if [ ! -x ${SCRIPT_PATH}/coredns ]; then
     printf "extracting coredns from docker image: ${COREDNS_IMAGE}\n"
     CTR_TEMP="$(mktemp -d)"
@@ -144,9 +143,9 @@ trap "exit 0" QUIT TERM                                    # Exit with code 0 on
 trap "exit 1" ABRT ERR INT PIPE                            # Exit with code 1 on a bad signal
 trap "printf 'executing cleanup function\n'; cleanup" EXIT # Always cleanup when you're exiting
 
-#######################################################################
+
 # generate the corefile
-#######################################################################
+# -------------------------------------------------------------------------------------------
 # Create a dummy interface listening on the link-local IP and the cluster DNS service IP
 printf "setting up aks-local-dns dummy interface with IPs ${NODE_LISTENER_IP} and ${CLUSTER_LISTENER_IP}\n"
 ip link add name aks-local-dns type dummy
@@ -210,14 +209,14 @@ networkctl reload
 
 printf "startup complete - serving node and pod DNS traffic\n"
 
-#######################################################################
+
 # systemd notify: send ready if service is Type=notify
-#######################################################################
+# -------------------------------------------------------------------------------------------
 if [[ ! -z "${NOTIFY_SOCKET:-}" ]]; then systemd-notify --ready; fi
 
-#######################################################################
+
 # systemd watchdog: send pings so we get restarted if we go unhealthy
-#######################################################################
+# -------------------------------------------------------------------------------------------
 # If the watchdog is defined, we check pod status and pass success to systemd
 if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     # Health check at 20% of WATCHDOG_USEC; this means that we should check
@@ -225,22 +224,21 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     # get restarted.
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
     HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
-    printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
+    printf "starting watchdog loop at %d second intervals\n" "${HEALTH_CHECK_INTERVAL}"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then
             if dig +short +timeout=1 +tries=1 -f<(printf "${HEALTH_CHECK_DNS_REQUEST}"); then
                 systemd-notify WATCHDOG=1
             fi
         fi
-        sleep ${HEALTH_CHECK_INTERVAL}
+        sleep "${HEALTH_CHECK_INTERVAL}"
     done
 else
-    wait -f ${COREDNS_PID}
+    wait -f "${COREDNS_PID}"
 fi
 
 # The cleanup function is called on exit, so it will be run after the
 # wait ends (which will be when a signal is sent or coredns crashes) or
 # the script receives a terminal signal.
-#######################################################################
+# -------------------------------------------------------------------------------------------
 # end of line
-#######################################################################
