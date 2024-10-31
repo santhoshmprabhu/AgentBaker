@@ -10,24 +10,17 @@ set -euo pipefail
 
 . /etc/default/aks-local-dns
 
-# CoreDNS image reference to use to obtain the binary if not present
-COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}"
+: "${COREDNS_IMAGE:? COREDNS_IMAGE is required}"
+: "${NODE_LISTENER_IP:? NODE_LISTENER_IP is required}"
+: "${CLUSTER_LISTENER_IP:? CLUSTER_LISTENER_IP is required}"
+: "${DEFAULT_UPSTREAM_DNS_SERVER_IP:? DEFAULT_UPSTREAM_DNS_SERVER_IP is required}"
 
-# This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
-NODE_LISTENER_IP="$2"
-
-# This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
-CLUSTER_LISTENER_IP="$3"
-
-# This is default upstream DNS server IP 169.63.129.16.
-DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"
-
-# Delay coredns shutdown to allow connections to finish
-COREDNS_SHUTDOWN_DELAY="${COREDNS_SHUTDOWN_DELAY_DEFAULT:-5}"
-
-# PID file
-PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}"
-
+COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}" # CoreDNS image reference to use to obtain the binary if not present
+NODE_LISTENER_IP="$2" # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
+CLUSTER_LISTENER_IP="$3" # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
+DEFAULT_UPSTREAM_DNS_SERVER_IP="$4" # This is default upstream DNS server IP 169.63.129.16.
+COREDNS_SHUTDOWN_DELAY="${COREDNS_SHUTDOWN_DELAY_DEFAULT:-5}" # Delay coredns shutdown to allow connections to finish
+PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}" # PID file
 
 #######################################################################
 # information variables
@@ -231,7 +224,7 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     # five times in every watchdog interval, and thus need to fail five checks to
     # get restarted.
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
-    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @169.254.10.10\nhealth-check.aks-local-dns.local @169.254.10.11"
+    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
     printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then

@@ -1569,6 +1569,14 @@ health-check.aks-local-dns.local:53 {
     loop
     nsid aks-local-dns
     prometheus {{$.LocalDnsProfile.NodeListenerIP}}:9253
+    template ANY ANY internal.cloudapp.net {
+        match "^(?:[^.]+\.){4,}internal\.cloudapp\.net\.$"
+        rcode NXDOMAIN
+        fallthrough
+    }
+    template ANY ANY reddog.microsoft.com {
+        rcode NXDOMAIN
+    }
 }{{end}}
 # Kube DNS traffic (Traffic from pods with dnsPolicy:ClusterFirst)
 {{- range $index, $domain := .SortedKubeDnsOverrideDomains}}
@@ -1593,5 +1601,13 @@ health-check.aks-local-dns.local:53 {
     }
     loop
     nsid aks-local-dns-pod
+    template ANY ANY internal.cloudapp.net {
+        match "^(?:[^.]+\.){4,}internal\.cloudapp\.net\.$"
+        rcode NXDOMAIN
+        fallthrough
+    }
+    template ANY ANY reddog.microsoft.com {
+        rcode NXDOMAIN
+    }
 }{{end}}
 `
