@@ -410,35 +410,35 @@ write_files:
     {{GetVariableProperty "cloudInitData" "ensureIMDSRestrictionScript"}}
 
 - path: /opt/azure/aks-local-dns/aks-local-dns.sh
-  permissions: "0644"
+  permissions: "0744"
   encoding: gzip
   owner: root
   content: !!binary |
     {{GetVariableProperty "cloudInitData" "aksLocalDnsScript"}}
 
 - path: /etc/systemd/system/aks-local-dns.service
-  permissions: "0644"
+  permissions: "0744"
   encoding: gzip
   owner: root
   content: !!binary |
     {{GetVariableProperty "cloudInitData" "aksLocalDnsSystemdService"}}
 
 - path: /etc/systemd/system/aks-local-dns.slice
-  permissions: "0644"
+  permissions: "0744"
   encoding: gzip
   owner: root
   content: !!binary |
     {{GetVariableProperty "cloudInitData" "aksLocalDnsSlice"}}
 
 - path: /etc/default/aks-local-dns
-  permissions: "0644"
+  permissions: "0744"
   encoding: gzip
   owner: root
   content: !!binary |
     {{GetVariableProperty "cloudInitData" "aksLocalDnsDefault"}}
   
 - path: /etc/systemd/resolved.conf.d/70-aks-dns.conf
-  permissions: "0644"
+  permissions: "0744"
   encoding: gzip
   owner: root
   content: !!binary |
