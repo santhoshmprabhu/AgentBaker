@@ -23,18 +23,19 @@ LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
 
 if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
     sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
-    printf "Replaced '${DEFAULT_UPSTREAM_DNS_SERVER_IP}' with '${UPSTREAM_DNS_SERVERS_FROM_VNET}' in '${LOCAL_DNS_CORE_FILE_PATH}' \n"
+    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
 fi
 
 
-IPTABLES='iptables -w -t raw -m comment --comment "AKS Local DNS: skip conntrack"'
+IPTABLES='iptables -w -t raw -m comment --comment "aks-local-dns: skip conntrack"'
 IPTABLES_RULES=()
 for CHAIN in OUTPUT PREROUTING; do
-for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
-for PROTO in tcp udp; do
-    IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
-done; done; done
-
+   for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
+       for PROTO in tcp udp; do
+           IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
+       done
+    done
+done
 
 function cleanup {
     set +e
@@ -46,7 +47,7 @@ function cleanup {
     done
 
     if [ -f ${NETWORK_DROPIN_FILE} ]; then
-        printf "reverting dns configuration by removing ${NETWORK_DROPIN_FILE}\n"
+        printf "Reverting DNS configuration by removing %s\n" "${NETWORK_DROPIN_FILE}"
         /bin/rm -f ${NETWORK_DROPIN_FILE}
         networkctl reload
     fi
@@ -81,25 +82,37 @@ fi
 
 
 if [ ! -x ${SCRIPT_PATH}/coredns ]; then
-    printf "extracting coredns from docker image: ${COREDNS_IMAGE}\n"
+    printf "extracting coredns from docker image: %s\n" "${COREDNS_IMAGE}"
     CTR_TEMP="$(mktemp -d)"
 
     function cleanup_coredns_import {
         set +e
         printf 'Error extracting coredns\n'
-        ctr -n k8s.io images unmount ${CTR_TEMP}
-        rm -rf ${CTR_TEMP}
+        ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
+        rm -rf "${CTR_TEMP}"
     }
     trap cleanup_coredns_import EXIT ABRT ERR INT PIPE QUIT TERM
 
-    ctr -n k8s.io images mount ${COREDNS_IMAGE} ${CTR_TEMP} >/dev/null
+    if ! ctr -n k8s.io images ls | grep -q "${COREDNS_IMAGE}"; then
+        printf "CoreDNS image not found locally. Attempting to pull from mcr.microsoft.com...\n"
+        if ! ctr -n k8s.io images pull "${COREDNS_IMAGE}"; then
+            printf 'Error: failed to pull coredns image: %s\n' "${COREDNS_IMAGE}"
+            exit 1
+        fi
+    fi
 
-    cp ${CTR_TEMP}/coredns ${SCRIPT_PATH}/coredns
+    if ctr -n k8s.io images mount "${COREDNS_IMAGE}" "${CTR_TEMP}" >/dev/null; then
 
-    ctr -n k8s.io images unmount ${CTR_TEMP} >/dev/null
-    rm -rf "${CTR_TEMP}"
+      cp "${CTR_TEMP}/coredns" "${SCRIPT_PATH}/coredns"
 
-    trap - EXIT ABRT ERR INT PIPE QUIT TERM
+      ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
+      rm -rf "${CTR_TEMP}"
+
+      trap - EXIT ABRT ERR INT PIPE QUIT TERM
+    else
+        printf 'Error: failed to mount coredns image: %s\n' "${COREDNS_IMAGE}"
+        exit 1
+    fi
 fi
 
 trap "exit 0" QUIT TERM                                    
