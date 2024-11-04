@@ -95,7 +95,7 @@ if [ ! -x ${SCRIPT_PATH}/coredns ]; then
 
     if ! ctr -n k8s.io images ls | grep -q "${COREDNS_IMAGE}"; then
         printf "CoreDNS image not found locally. Attempting to pull from mcr.microsoft.com...\n"
-        if ! ctr -n k8s.io images pull "${COREDNS_IMAGE}"; then
+        if ! oras pull "${COREDNS_IMAGE}" -o "${CTR_TEMP}"; then
             printf 'Error: failed to pull coredns image: %s\n' "${COREDNS_IMAGE}"
             exit 1
         fi
