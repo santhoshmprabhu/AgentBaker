@@ -12,7 +12,7 @@ set -euo pipefail
 COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}"                # CoreDNS image reference to use to obtain the binary if not present
 NODE_LISTENER_IP="$2"                                         # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
 CLUSTER_LISTENER_IP="$3"                                      # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
-DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"                           # This is default AzureDNS serverIP 169.63.129.16.
+DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"                           # This is default UpstreamDNS serverIP 169.63.129.16.
 COREDNS_SHUTDOWN_DELAY="${COREDNS_SHUTDOWN_DELAY_DEFAULT:-5}" # Delay coredns shutdown to allow connections to finish
 PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}"        # PID file
 
@@ -24,8 +24,27 @@ DEFAULT_ROUTE_INTERFACE="$(ip -j route get 168.63.129.16 | jq -r '.[0].dev')"
 NETWORK_FILE="$(networkctl --json=short status ${DEFAULT_ROUTE_INTERFACE} | jq -r '.NetworkFile')"
 NETWORK_DROPIN_DIR="${NETWORK_FILE}.d"
 NETWORK_DROPIN_FILE="${NETWORK_DROPIN_DIR}/70-aks-local-dns.conf"
-UPSTREAM_DNS_SERVERS_FROM_VNET="$(</run/systemd/resolve/resolv.conf awk '/nameserver/ {print $2}' | paste -sd' ')"
+UPSTREAM_DNS_SERVERS="$(</run/systemd/resolve/resolv.conf awk '/nameserver/ {print $2}' | paste -sd' ')"
+
 LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
+
+if [ ! -f "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
+  echo "Error: Corefile does not exist."
+  exit 1
+fi
+
+if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
+  echo "Error: Corefile is empty."
+  exit 1
+fi
+
+if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
+    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
+    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
+fi
+
+cat "${LOCAL_DNS_CORE_FILE_PATH}"
 
 
 # Iptables: build rules
@@ -100,7 +119,7 @@ fi
 # coredns: extract from image
 # -------------------------------------------------------------------------------------------
 if [ ! -x ${SCRIPT_PATH}/coredns ]; then
-    printf "extracting coredns from docker image: %s\n" "${COREDNS_IMAGE}"
+    printf "extracting coredns from docker image: ${COREDNS_IMAGE}\n"
     CTR_TEMP="$(mktemp -d)"
 
     # Set a trap to clean up the temp directory if anything fails
@@ -108,8 +127,8 @@ if [ ! -x ${SCRIPT_PATH}/coredns ]; then
         # Disable error handling so that we don't get into a recursive loop
         set +e
         printf 'Error extracting coredns\n'
-        ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
-        rm -rf "${CTR_TEMP}"
+        ctr -n k8s.io images unmount ${CTR_TEMP}
+        rm -rf ${CTR_TEMP}
     }
     trap cleanup_coredns_import EXIT ABRT ERR INT PIPE QUIT TERM
 
@@ -147,24 +166,6 @@ printf "adding iptables rules to skip conntrack for queries to aks-local-dns\n"
 for RULE in "${IPTABLES_RULES[@]}"; do
     eval "${IPTABLES}" -A "${RULE}"
 done
-
-if [ ! -f "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
-  echo "Error: Corefile does not exist."
-  exit 1
-fi
-
-if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
-  echo "Error: Corefile is empty."
-  exit 1
-fi
-
-if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
-    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
-    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
-    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
-fi
-
-cat "${LOCAL_DNS_CORE_FILE_PATH}"
 
 # Build the coredns command
 COREDNS_COMMAND="/opt/azure/aks-local-dns/coredns -conf ${LOCAL_DNS_CORE_FILE_PATH} -pidfile ${PID_FILE}"
@@ -218,7 +219,7 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     # five times in every watchdog interval, and thus need to fail five checks to
     # get restarted.
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
-    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
+    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @169.254.10.10\nhealth-check.aks-local-dns.local @169.254.10.11"
     printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then

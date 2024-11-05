@@ -18,8 +18,27 @@ DEFAULT_ROUTE_INTERFACE="$(ip -j route get 168.63.129.16 | jq -r '.[0].dev')"
 NETWORK_FILE="$(networkctl --json=short status ${DEFAULT_ROUTE_INTERFACE} | jq -r '.NetworkFile')"
 NETWORK_DROPIN_DIR="${NETWORK_FILE}.d"
 NETWORK_DROPIN_FILE="${NETWORK_DROPIN_DIR}/70-aks-local-dns.conf"
-UPSTREAM_DNS_SERVERS_FROM_VNET="$(</run/systemd/resolve/resolv.conf awk '/nameserver/ {print $2}' | paste -sd' ')"
+UPSTREAM_DNS_SERVERS="$(</run/systemd/resolve/resolv.conf awk '/nameserver/ {print $2}' | paste -sd' ')"
+
 LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
+
+if [ ! -f "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
+  echo "Error: Corefile does not exist."
+  exit 1
+fi
+
+if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
+  echo "Error: Corefile is empty."
+  exit 1
+fi
+
+if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
+    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
+    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
+fi
+
+cat "${LOCAL_DNS_CORE_FILE_PATH}"
 
 
 IPTABLES='iptables -w -t raw -m comment --comment "AKS Local DNS: skip conntrack"'
@@ -76,14 +95,14 @@ fi
 
 
 if [ ! -x ${SCRIPT_PATH}/coredns ]; then
-    printf "extracting coredns from docker image: %s\n" "${COREDNS_IMAGE}"
+    printf "extracting coredns from docker image: ${COREDNS_IMAGE}\n"
     CTR_TEMP="$(mktemp -d)"
 
     function cleanup_coredns_import {
         set +e
         printf 'Error extracting coredns\n'
-        ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
-        rm -rf "${CTR_TEMP}"
+        ctr -n k8s.io images unmount ${CTR_TEMP}
+        rm -rf ${CTR_TEMP}
     }
     trap cleanup_coredns_import EXIT ABRT ERR INT PIPE QUIT TERM
 
@@ -112,24 +131,6 @@ printf "adding iptables rules to skip conntrack for queries to aks-local-dns\n"
 for RULE in "${IPTABLES_RULES[@]}"; do
     eval "${IPTABLES}" -A "${RULE}"
 done
-
-if [ ! -f "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
-  echo "Error: Corefile does not exist."
-  exit 1
-fi
-
-if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
-  echo "Error: Corefile is empty."
-  exit 1
-fi
-
-if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
-    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
-    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
-    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
-fi
-
-cat "${LOCAL_DNS_CORE_FILE_PATH}"
 
 COREDNS_COMMAND="/opt/azure/aks-local-dns/coredns -conf ${LOCAL_DNS_CORE_FILE_PATH} -pidfile ${PID_FILE}"
 if [[ ! -z "${SYSTEMD_EXEC_PID:-}" ]]; then
@@ -171,7 +172,7 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" ]]; then systemd-notify --ready; fi
 
 if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
-    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
+    HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @169.254.10.10\nhealth-check.aks-local-dns.local @169.254.10.11"
     printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then

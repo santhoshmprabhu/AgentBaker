@@ -486,6 +486,7 @@ ensureKubelet() {
 
     if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
         sed -ie "s/--cluster-dns=[^ \n]\+/--cluster-dns=${AKS_LOCAL_DNS_CLUSTER_LISTENER_IP}/" "${KUBELET_DEFAULT_FILE}"
+        printf "Updated --cluster-dns to '%s' in '%s'\n" "${AKS_LOCAL_DNS_CLUSTER_LISTENER_IP}" "${KUBELET_DEFAULT_FILE}"
     fi
     chmod 0600 "${KUBELET_DEFAULT_FILE}"
     

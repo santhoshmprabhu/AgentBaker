@@ -204,10 +204,6 @@ if [ "${IPV6_DUAL_STACK_ENABLED}" == "true" ]; then
     logs_to_events "AKS.CSE.ensureDHCPv6" ensureDHCPv6
 fi
 
-if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
-    logs_to_events "AKS.CSE.ensureAKSLocalDNS" ensureAKSLocalDNS
-fi
-
 if isMarinerOrAzureLinux "$OS"; then
     logs_to_events "AKS.CSE.configureSystemdUseDomains" configureSystemdUseDomains
 fi
@@ -274,6 +270,10 @@ logs_to_events "AKS.CSE.ensureSysctl" ensureSysctl
 
 if [ "${NEEDS_CONTAINERD}" == "true" ] &&  [ "${SHOULD_CONFIG_CONTAINERD_ULIMITS}" == "true" ]; then
   logs_to_events "AKS.CSE.setContainerdUlimits" configureContainerdUlimits
+fi
+
+if [ "${AKS_LOCAL_DNS_ENABLED}" == "true" ]; then
+    logs_to_events "AKS.CSE.ensureAKSLocalDNS" ensureAKSLocalDNS
 fi
 
 logs_to_events "AKS.CSE.ensureKubelet" ensureKubelet
