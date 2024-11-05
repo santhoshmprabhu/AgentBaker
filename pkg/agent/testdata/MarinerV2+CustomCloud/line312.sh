@@ -21,11 +21,6 @@ NETWORK_DROPIN_FILE="${NETWORK_DROPIN_DIR}/70-aks-local-dns.conf"
 UPSTREAM_DNS_SERVERS_FROM_VNET="$(</run/systemd/resolve/resolv.conf awk '/nameserver/ {print $2}' | paste -sd' ')"
 LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
 
-if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
-    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
-    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
-fi
-
 
 IPTABLES='iptables -w -t raw -m comment --comment "aks-local-dns: skip conntrack"'
 IPTABLES_RULES=()
@@ -95,7 +90,11 @@ if [ ! -x ${SCRIPT_PATH}/coredns ]; then
 
     if ! ctr -n k8s.io images ls | grep -q "${COREDNS_IMAGE}"; then
         printf "CoreDNS image not found locally. Attempting to pull from mcr.microsoft.com...\n"
-        if ! oras pull "${COREDNS_IMAGE}" -o "${CTR_TEMP}"; then
+
+        ORAS_OUTPUT=/tmp/oras_verbose.out
+        ORAS_REGISTRY_CONFIG_FILE=/etc/oras/config.yaml
+
+        if ! timeout 60 oras pull "${COREDNS_IMAGE}" -o "${CTR_TEMP}" --registry-config "${ORAS_REGISTRY_CONFIG_FILE}" > "$ORAS_OUTPUT" 2>&1; then
             printf 'Error: failed to pull coredns image: %s\n' "${COREDNS_IMAGE}"
             exit 1
         fi
@@ -139,6 +138,12 @@ fi
 if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
   echo "Error: Corefile is empty."
   exit 1
+fi
+
+if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
+    echo "Default DNS IP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, VNET DNS IP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+    sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
+    printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
 fi
 
 cat "${LOCAL_DNS_CORE_FILE_PATH}"
