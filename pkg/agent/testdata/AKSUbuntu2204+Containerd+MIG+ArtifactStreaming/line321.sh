@@ -22,15 +22,14 @@ UPSTREAM_DNS_SERVERS_FROM_VNET="$(</run/systemd/resolve/resolv.conf awk '/namese
 LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
 
 
-IPTABLES='iptables -w -t raw -m comment --comment "aks-local-dns: skip conntrack"'
+IPTABLES='iptables -w -t raw -m comment --comment "AKS Local DNS: skip conntrack"'
 IPTABLES_RULES=()
 for CHAIN in OUTPUT PREROUTING; do
-   for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
-       for PROTO in tcp udp; do
-           IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
-       done
-    done
-done
+for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
+for PROTO in tcp udp; do
+    IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
+done; done; done
+
 
 function cleanup {
     set +e
@@ -88,30 +87,14 @@ if [ ! -x ${SCRIPT_PATH}/coredns ]; then
     }
     trap cleanup_coredns_import EXIT ABRT ERR INT PIPE QUIT TERM
 
-    if ! ctr -n k8s.io images ls | grep -q "${COREDNS_IMAGE}"; then
-        printf "CoreDNS image not found locally. Attempting to pull from mcr.microsoft.com...\n"
+    ctr -n k8s.io images mount ${COREDNS_IMAGE} ${CTR_TEMP} >/dev/null
 
-        ORAS_OUTPUT=/tmp/oras_verbose.out
-        ORAS_REGISTRY_CONFIG_FILE=/etc/oras/config.yaml
+    cp ${CTR_TEMP}/coredns ${SCRIPT_PATH}/coredns
 
-        if ! timeout 60 oras pull "${COREDNS_IMAGE}" -o "${CTR_TEMP}" --registry-config "${ORAS_REGISTRY_CONFIG_FILE}" > "$ORAS_OUTPUT" 2>&1; then
-            printf 'Error: failed to pull coredns image: %s\n' "${COREDNS_IMAGE}"
-            exit 1
-        fi
-    fi
+    ctr -n k8s.io images unmount ${CTR_TEMP} >/dev/null
+    rm -rf "${CTR_TEMP}"
 
-    if ctr -n k8s.io images mount "${COREDNS_IMAGE}" "${CTR_TEMP}" >/dev/null; then
-
-      cp "${CTR_TEMP}/coredns" "${SCRIPT_PATH}/coredns"
-
-      ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
-      rm -rf "${CTR_TEMP}"
-
-      trap - EXIT ABRT ERR INT PIPE QUIT TERM
-    else
-        printf 'Error: failed to mount coredns image: %s\n' "${COREDNS_IMAGE}"
-        exit 1
-    fi
+    trap - EXIT ABRT ERR INT PIPE QUIT TERM
 fi
 
 trap "exit 0" QUIT TERM                                    
@@ -141,7 +124,7 @@ if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
 fi
 
 if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
-    echo "Default DNS IP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, VNET DNS IP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
     sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
     printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
 fi
@@ -189,15 +172,15 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" ]]; then systemd-notify --ready; fi
 if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
     HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
-    printf "starting watchdog loop at %d second intervals\n" "${HEALTH_CHECK_INTERVAL}"
+    printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then
             if dig +short +timeout=1 +tries=1 -f<(printf "${HEALTH_CHECK_DNS_REQUEST}"); then
                 systemd-notify WATCHDOG=1
             fi
         fi
-        sleep "${HEALTH_CHECK_INTERVAL}"
+        sleep ${HEALTH_CHECK_INTERVAL}
     done
 else
-    wait -f "${COREDNS_PID}"
+    wait -f ${COREDNS_PID}
 fi

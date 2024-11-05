@@ -12,7 +12,7 @@ set -euo pipefail
 COREDNS_IMAGE="${COREDNS_IMAGE_DEFAULT:-"$1"}"                # CoreDNS image reference to use to obtain the binary if not present
 NODE_LISTENER_IP="$2"                                         # This is the IP that the local DNS service should bind to for node traffic; usually an APIPA address
 CLUSTER_LISTENER_IP="$3"                                      # This is the IP that the local DNS service should bind to for pod traffic; usually an APIPA address
-DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"                           # This is default upstream DNS server IP 169.63.129.16.
+DEFAULT_UPSTREAM_DNS_SERVER_IP="$4"                           # This is default AzureDNS serverIP 169.63.129.16.
 COREDNS_SHUTDOWN_DELAY="${COREDNS_SHUTDOWN_DELAY_DEFAULT:-5}" # Delay coredns shutdown to allow connections to finish
 PID_FILE="${PID_FILE_DEFAULT:-/run/aks-local-dns.pid}"        # PID file
 
@@ -33,15 +33,14 @@ LOCAL_DNS_CORE_FILE_PATH="/opt/azure/aks-local-dns/Corefile"
 # These rules skip conntrack for DNS traffic to save conntrack table
 # space. OUTPUT rules affect node services and hostNetwork: true pods.
 # PREROUTING rules affect traffic from regular pods.
-IPTABLES='iptables -w -t raw -m comment --comment "aks-local-dns: skip conntrack"'
+IPTABLES='iptables -w -t raw -m comment --comment "AKS Local DNS: skip conntrack"'
 IPTABLES_RULES=()
 for CHAIN in OUTPUT PREROUTING; do
-   for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
-       for PROTO in tcp udp; do
-           IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
-       done
-    done
-done
+for IP in ${NODE_LISTENER_IP} ${CLUSTER_LISTENER_IP}; do
+for PROTO in tcp udp; do
+    IPTABLES_RULES+=("${CHAIN} -p ${PROTO} -d ${IP} --dport 53 -j NOTRACK")
+done; done; done
+
 
 # cleanup function: will be run on script exit/crash to revert config
 # -------------------------------------------------------------------------------------------
@@ -114,37 +113,18 @@ if [ ! -x ${SCRIPT_PATH}/coredns ]; then
     }
     trap cleanup_coredns_import EXIT ABRT ERR INT PIPE QUIT TERM
 
-    # Check if the image exists in the local cache
-    if ! ctr -n k8s.io images ls | grep -q "${COREDNS_IMAGE}"; then
-        printf "CoreDNS image not found locally. Attempting to pull from mcr.microsoft.com...\n"
-
-        ORAS_OUTPUT=/tmp/oras_verbose.out
-        # oras registry auth config file, not used, but have to define to avoid error "Error: failed to get user home directory: $HOME is not defined" 
-        ORAS_REGISTRY_CONFIG_FILE=/etc/oras/config.yaml
-
-        # Use oras instead of ctr to pull the image, so it works on airgap environments.
-        if ! timeout 60 oras pull "${COREDNS_IMAGE}" -o "${CTR_TEMP}" --registry-config "${ORAS_REGISTRY_CONFIG_FILE}" > "$ORAS_OUTPUT" 2>&1; then
-            printf 'Error: failed to pull coredns image: %s\n' "${COREDNS_IMAGE}"
-            exit 1
-        fi
-    fi
-
     # Mount the coredns image to the temporary directory
-    if ctr -n k8s.io images mount "${COREDNS_IMAGE}" "${CTR_TEMP}" >/dev/null; then
+    ctr -n k8s.io images mount ${COREDNS_IMAGE} ${CTR_TEMP} >/dev/null
 
-      # Copy coredns to SCRIPT_PATH
-      cp "${CTR_TEMP}/coredns" "${SCRIPT_PATH}/coredns"
+    # Copy coredns to SCRIPT_PATH
+    cp ${CTR_TEMP}/coredns ${SCRIPT_PATH}/coredns
 
-      # Umount and clean up the temporary directory
-      ctr -n k8s.io images unmount "${CTR_TEMP}" >/dev/null
-      rm -rf "${CTR_TEMP}"
+    # Umount and clean up the temporary directory
+    ctr -n k8s.io images unmount ${CTR_TEMP} >/dev/null
+    rm -rf "${CTR_TEMP}"
 
-      # Clear the trap
-      trap - EXIT ABRT ERR INT PIPE QUIT TERM
-    else
-        printf 'Error: failed to mount coredns image: %s\n' "${COREDNS_IMAGE}"
-        exit 1
-    fi
+    # Clear the trap
+    trap - EXIT ABRT ERR INT PIPE QUIT TERM
 fi
 
 # Enable the cleanup function now that we have a coredns binary
@@ -179,7 +159,7 @@ if [ ! -s "${LOCAL_DNS_CORE_FILE_PATH}" ]; then
 fi
 
 if [ "${UPSTREAM_DNS_SERVERS_FROM_VNET}" != "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" ]; then
-    echo "Default DNS IP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, VNET DNS IP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
+    echo "VNET DNSIP: ${UPSTREAM_DNS_SERVERS_FROM_VNET}, AzureDNSIP: ${DEFAULT_UPSTREAM_DNS_SERVER_IP}"
     sed -ie "s/${DEFAULT_UPSTREAM_DNS_SERVER_IP}/${UPSTREAM_DNS_SERVERS_FROM_VNET}/g" "${LOCAL_DNS_CORE_FILE_PATH}"
     printf "Updated DNSIP from '%s' to '%s' in '%s'\n" "${DEFAULT_UPSTREAM_DNS_SERVER_IP}" "${UPSTREAM_DNS_SERVERS_FROM_VNET}" "${LOCAL_DNS_CORE_FILE_PATH}"
 fi
@@ -239,17 +219,17 @@ if [[ ! -z "${NOTIFY_SOCKET:-}" && ! -z "${WATCHDOG_USEC:-}" ]]; then
     # get restarted.
     HEALTH_CHECK_INTERVAL=$((${WATCHDOG_USEC:-5000000} * 20 / 100 / 1000000))
     HEALTH_CHECK_DNS_REQUEST="health-check.aks-local-dns.local @${NODE_LISTENER_IP}\nhealth-check.aks-local-dns.local @${CLUSTER_LISTENER_IP}"
-    printf "starting watchdog loop at %d second intervals\n" "${HEALTH_CHECK_INTERVAL}"
+    printf "starting watchdog loop at ${HEALTH_CHECK_INTERVAL} second intervals\n"
     while [ true ]; do
         if [[ "$(curl -s "http://${NODE_LISTENER_IP}:8181/ready")" == "OK" ]]; then
             if dig +short +timeout=1 +tries=1 -f<(printf "${HEALTH_CHECK_DNS_REQUEST}"); then
                 systemd-notify WATCHDOG=1
             fi
         fi
-        sleep "${HEALTH_CHECK_INTERVAL}"
+        sleep ${HEALTH_CHECK_INTERVAL}
     done
 else
-    wait -f "${COREDNS_PID}"
+    wait -f ${COREDNS_PID}
 fi
 
 # The cleanup function is called on exit, so it will be run after the
