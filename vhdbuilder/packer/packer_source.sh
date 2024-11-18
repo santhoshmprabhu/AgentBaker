@@ -145,8 +145,10 @@ copyPackerFiles() {
   if grep -q "kata" <<< "$FEATURE_FLAGS"; then
     # KataCC SPEC file assumes kata config points to the files exactly under this path
     if [[ $OS_VERSION == "2.0" ]]; then
+      echo "<mitchzhu> should be copying UVM into OS 2.0"
       KATA_CONFIG_DIR=/var/cache/kata-containers/osbuilder-images/kernel-uvm
     elif [[ $OS_VERSION == "3.0" ]]; then
+      echo "<mitchzhu> should be copying UVM into OS 3.0"
       KATA_CONFIG_DIR=/usr/share/kata-containers
     else
       echo "Unexpected OS version '${OS_VERSION}' in kata feature flag code path"
@@ -155,6 +157,7 @@ copyPackerFiles() {
     KATACC_CONFIG_DIR=/opt/confidential-containers/share/kata-containers
 
     if [[ $OS_VERSION == "2.0" ]]; then
+      echo "<mitchzhu> should be copying UVM into OS 2.0"
       KATA_INITRD_SRC=/home/packer/kata-containers-initrd-base.img
       KATA_INITRD_DEST=$KATA_CONFIG_DIR/kata-containers-initrd.img
       cpAndMode $KATA_INITRD_SRC $KATA_INITRD_DEST 0755
@@ -163,6 +166,7 @@ copyPackerFiles() {
       KATACC_IMAGE_DEST=$KATACC_CONFIG_DIR/kata-containers.img
       cpAndMode $KATACC_IMAGE_SRC $KATACC_IMAGE_DEST 0755
     elif [[ $OS_VERSION == "3.0" ]]; then
+      echo "<mitchzhu> should be copying UVM into OS 3.0"
       KATA_IMAGE_SRC=/home/packer/kata-containers.img
       KATA_IMAGE_DEST=$KATA_CONFIG_DIR/kata-containers.img
       cpAndMode $KATA_IMAGE_SRC $KATA_IMAGE_DEST 0755
