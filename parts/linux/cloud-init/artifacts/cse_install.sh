@@ -618,7 +618,7 @@ installKubeletKubectlAndKubeProxy() {
                 # so that we still need to extract the binary version from kube_binary_url
                 url_regax='https://acs-mirror.azureedge.net/kubernetes/v[0-9]+\.[0-9]+\..+/binaries/.+'
                 if [[ -n ${KUBE_BINARY_URL} ]]; then
-                    if [[ ${KUBE_BINARY_URL} =~ $registry_regex ]]; then
+                    if [[ ${KUBE_BINARY_URL} =~ $url_regax ]]; then
                         version_with_prefix="${KUBE_BINARY_URL#*kubernetes/}"
                         # Extract the version part
                         binary_version="${version_with_prefix%%/*}"
