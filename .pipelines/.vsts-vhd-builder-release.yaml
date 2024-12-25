@@ -1281,6 +1281,7 @@ stages:
             env:
               BUILD_SOURCEVERSION: $(Build.SourceVersion)
           - task: CopyFiles@2
+            condition: failed()
             displayName: Copy CVE Report
             inputs:
               SourceFolder: '$(System.DefaultWorkingDirectory)'
