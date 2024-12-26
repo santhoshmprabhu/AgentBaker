@@ -1287,3 +1287,8 @@ stages:
               SourceFolder: '$(System.DefaultWorkingDirectory)'
               Contents: 'cve-report.out'
               TargetFolder: '$(Build.ArtifactStagingDirectory)'
+          - task: PublishPipelineArtifact@1
+            displayName: Publish CVE Report
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)/cve-report.out'
+              artifact: 'cve-report'
