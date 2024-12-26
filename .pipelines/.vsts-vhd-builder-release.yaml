@@ -1289,6 +1289,7 @@ stages:
               TargetFolder: '$(Build.ArtifactStagingDirectory)'
           - task: PublishPipelineArtifact@1
             condition: succeeded()
+            dependsOn: CopyFiles
             displayName: Publish CVE Report
             inputs:
               targetPath: '$(Build.ArtifactStagingDirectory)/cve-report.out'
