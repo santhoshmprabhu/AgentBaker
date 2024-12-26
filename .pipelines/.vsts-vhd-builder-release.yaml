@@ -1291,5 +1291,5 @@ stages:
             condition: succeeded()
             displayName: Publish CVE Report
             inputs:
-              targetPath: '$(Build.ArtifactStagingDirectory)/cve-report.out'
+              targetPath: '$(Build.ArtifactStagingDirectory)'
               artifact: 'cve-report'
